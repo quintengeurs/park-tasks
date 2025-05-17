@@ -1,44 +1,64 @@
+require('dotenv').config(); // Load environment variables from .env file
+
 const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
 const bcrypt = require('bcrypt');
 const session = require('express-session');
+const Sequelize = require('sequelize');
+const SequelizeStore = require('connect-session-sequelize')(session.Store);
 const multer = require('multer');
 const path = require('path');
+const http = require('http');
 const WebSocket = require('ws');
 
 const app = express();
-const port = 3000;
+const port = process.env.PORT || 3000; // Use dynamic port for hosting platforms
 
-// SQLite database setup
-const db = new sqlite3.Database(':memory:');
+// Create HTTP server for Express and WebSocket
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server });
 
-db.serialize(() => {
-    db.run(`CREATE TABLE users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE,
-        password TEXT,
-        role TEXT
-    )`);
+// SQLite database setup (file-based for persistence)
+const db = new sqlite3.Database('database.db', (err) => {
+    if (err) {
+        console.error('Database connection error:', err);
+    } else {
+        console.log('Connected to SQLite file database');
+    }
+});
 
-    db.run(`CREATE TABLE tasks (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT,
-        type TEXT,
-        description TEXT,
-        due_date TEXT,
-        urgency TEXT,
-        allocated_to TEXT,
-        season TEXT,
-        image TEXT,
-        completed BOOLEAN,
-        archived BOOLEAN,
-        recurrence TEXT,
-        original_task_id INTEGER
-    )`);
+// Initialize database tables
+db.run(`CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE,
+    password TEXT,
+    role TEXT
+)`);
 
-    // Seed admin user
-    const hashedPassword = bcrypt.hashSync('admin123', 10);
-    db.run(`INSERT OR IGNORE INTO users (username, password, role) VALUES (?, ?, ?)`, ['admin', hashedPassword, 'admin']);
+db.run(`CREATE TABLE IF NOT EXISTS tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT,
+    type TEXT,
+    description TEXT,
+    due_date TEXT,
+    urgency TEXT,
+    allocated_to TEXT,
+    season TEXT,
+    image TEXT,
+    completed BOOLEAN,
+    archived BOOLEAN,
+    recurrence TEXT,
+    original_task_id INTEGER
+)`);
+
+// Seed admin user
+const hashedPassword = bcrypt.hashSync('admin123', 10);
+db.run(`INSERT OR IGNORE INTO users (username, password, role) VALUES (?, ?, ?)`, ['admin', hashedPassword, 'admin']);
+
+// Sequelize for session storage
+const sequelize = new Sequelize({
+    dialect: 'sqlite',
+    storage: 'database.db'
 });
 
 // Middleware
@@ -47,10 +67,16 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'public/uploads')));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(session({
-    secret: 'your-secret-key',
+    secret: process.env.SESSION_SECRET || 'your-secret-key', // Use env variable for secret
     resave: false,
-    saveUninitialized: false
+    saveUninitialized: false,
+    store: new SequelizeStore({
+        db: sequelize
+    })
 }));
+
+// Sync session store
+sequelize.sync();
 
 // Multer setup for file uploads
 const storage = multer.diskStorage({
@@ -360,8 +386,7 @@ app.delete('/api/users/:id', ensureAuthenticated, (req, res) => {
     });
 });
 
-// WebSocket setup
-const wss = new WebSocket.Server({ port: 8080 });
+// WebSocket broadcast function
 function broadcast(data) {
     console.log('Broadcasting:', data);
     wss.clients.forEach(client => {
@@ -371,7 +396,7 @@ function broadcast(data) {
     });
 }
 
-app.listen(port, () => {
-    console.log(`Connected to SQLite in-memory database`);
+// Start the server
+server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}`);
 });
