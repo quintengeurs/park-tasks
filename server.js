@@ -137,9 +137,16 @@ app.get('/api/current-user', (req, res) => {
     }
 });
 
-app.get('/api/logout', (req, res) => {
-    req.session.destroy();
-    res.json({ success: true });
+app.post('/api/logout', (req, res) => {
+    req.session.destroy((err) => {
+        if (err) {
+            console.error('Logout error:', err);
+            return res.status(500).json({ success: false, message: 'Failed to log out' });
+        }
+        // Clear the session cookie
+        res.clearCookie('connect.sid'); // Matches the default cookie name used by express-session
+        res.json({ success: true });
+    });
 });
 
 // Task routes

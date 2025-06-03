@@ -45,28 +45,47 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Navbar setup
-    if (navbar) {
-        fetch('/api/current-user')
-            .then(res => res.json())
-            .then(user => {
-                if (user) {
-                    navbar.innerHTML = `
-                        <a href="/">Tasks</a>
-                        <a href="/admin">Admin</a>
-                        <a href="/archive">Archive</a>
-                        <a href="/staff">Staff Management</a>
-                        <a href="/logout">Logout</a>
-                    `;
-                } else {
-                    window.location.href = '/login';
-                }
-            })
-            .catch(err => {
-                console.error('Navbar fetch error:', err);
+// In the navbar setup section
+if (navbar) {
+    fetch('/api/current-user')
+        .then(res => res.json())
+        .then(user => {
+            if (user) {
+                navbar.innerHTML = `
+                    <a href="/">Tasks</a>
+                    <a href="/admin">Admin</a>
+                    <a href="/archive">Archive</a>
+                    <a href="/staff">Staff Management</a>
+                    <button id="logout-btn">Logout</button> <!-- Changed to button -->
+                `;
+                // Add event listener for logout button
+                const logoutBtn = document.getElementById('logout-btn');
+                logoutBtn.addEventListener('click', async () => {
+                    try {
+                        const res = await fetch('/api/logout', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'include' // Include cookies for session
+                        });
+                        const data = await res.json();
+                        if (data.success) {
+                            window.location.href = '/login';
+                        } else {
+                            console.error('Logout failed:', data.message);
+                        }
+                    } catch (err) {
+                        console.error('Logout error:', err);
+                    }
+                });
+            } else {
                 window.location.href = '/login';
-            });
-    }
+            }
+        })
+        .catch(err => {
+            console.error('Navbar fetch error:', err);
+            window.location.href = '/login';
+        });
+}
 
     // Determine current season based on month
     function getCurrentSeason() {
@@ -77,10 +96,10 @@ document.addEventListener('DOMContentLoaded', () => {
         return 'winter'; // Dec-Feb
     }
 
-    // WebSocket setup
+// WebSocket setup
     let ws;
     function connectWebSocket() {
-        ws = new WebSocket('ws://localhost:8080');
+        ws = new WebSocket('wss://park-tasks.onrender.com/');
         ws.onopen = () => console.log('WebSocket connected');
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
