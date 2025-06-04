@@ -3,17 +3,48 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Archive - Seasonal Tasks</title>
-    <link rel="stylesheet" href="css/styles.css">
+    <title>Archive - Park Tasks</title>
+    <link rel="stylesheet" href="/css/styles.css">
 </head>
 <body>
-    <nav id="navbar" class="navbar"></nav>
-    <div class="container">
+    <header>
         <h1>Archived Tasks</h1>
-        <div id="archive-tasks" class="task-list">
-            <div class="tasks"></div>
+        <nav>
+            <a href="/">Home</a>
+            <% if (user.role === 'Admin') { %>
+                <a href="/admin">Admin</a>
+            <% } %>
+            <a href="/staff">Staff</a>
+            <a href="/archive">Archive</a>
+            <a href="/issues">Issues</a>
+            <a href="/inspections">Inspections</a>
+            <a href="/logout">Logout</a>
+        </nav>
+    </header>
+    <main>
+        <h2>Completed Tasks</h2>
+        <div class="task-list">
+            <% tasks.forEach(task => { %>
+                <div class="task-card <%= task.urgency === 'High' ? 'high-urgency' : '' %>">
+                    <h3><%= task.title %></h3>
+                    <p><strong>Description:</strong> <%= task.description %></p>
+                    <p><strong>Location:</strong> <%= task.location %></p>
+                    <p><strong>Type:</strong> <%= task.type %></p>
+                    <p><strong>Urgency:</strong> <%= task.urgency %></p>
+                    <p><strong>Completed:</strong> <%= task.completed_date %></p>
+                    <% if (task.completion_note) { %>
+                        <p><strong>Note:</strong> <%= task.completion_note %></p>
+                    <% } %>
+                    <% if (task.completion_image) { %>
+                        <img src="<%= task.completion_image %>" alt="Completion Image" class="task-image">
+                    <% } %>
+                    <% if (task.image_path) { %>
+                        <img src="<%= task.image_path %>" alt="Task Image" class="task-image">
+                    <% } %>
+                </div>
+            <% }) %>
         </div>
-    </div>
-    <script src="js/scripts.js"></script>
+    </main>
+    <script src="/js/script.js"></script>
 </body>
 </html>
