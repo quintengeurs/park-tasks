@@ -1,4 +1,5 @@
 const express = require('express');
+const http = require('http');
 const sqlite3 = require('sqlite3').verbose();
 const bcrypt = require('bcrypt');
 const session = require('express-session');
@@ -6,6 +7,8 @@ const multer = require('multer');
 const path = require('path');
 const WebSocket = require('ws');
 const app = express();
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server });
 
 // Middleware
 app.use(express.static('public'));
@@ -34,8 +37,7 @@ const db = new sqlite3.Database('database.db');
 // Set view engine
 app.set('view engine', 'ejs');
 
-// WebSocket server
-const wss = new WebSocket.Server({ port: 8080 });
+// WebSocket setup
 wss.on('connection', (ws) => {
     console.log('WebSocket client connected');
     ws.on('close', () => console.log('WebSocket client disconnected'));
@@ -137,7 +139,7 @@ app.post('/api/tasks/:id/complete', (req, res) => {
     });
 });
 
-app.post('/api/tasks/:id', (req, res) => {
+app.post('/api/tasks/:id/archive', (req, res) => {
     const taskId = req.params.id;
     db.run('UPDATE tasks SET archived = true WHERE id = ?', [taskId], (err) => {
         if (err) return res.status(500).json({ success: false, message: 'Database error' });
@@ -165,14 +167,14 @@ app.get('/api/users', (req, res) => {
         if (err) return res.status(500).json({ success: false, message: 'Database error' });
         res.json(users);
     });
+});
 
 app.post('/api/users', (req, res) => {
     const { username, password, role } = req.body;
-    const hashedPassword = bcrypt.hashSync(password, 10);
-    db.run('SELECT username FROM users WHERE username = ?', [username], (err, existingUser) => {
-        if (existingUser) {
-            return res.json({ success: false, message: 'Username already exists' });
-        }
+    db.get('SELECT username FROM users WHERE username = ?', [username], (err, existingUser) => {
+        if (err) return res.status(500).json({ success: false, message: 'Database error' });
+        if (existingUser) return res.json({ success: false, message: 'Username already exists' });
+        const hashedPassword = bcrypt.hashSync(password, 10);
         db.run(
             'INSERT INTO users (username, password, role) VALUES (?, ?, ?)',
             [username, hashedPassword, role],
@@ -199,10 +201,10 @@ app.put('/api/users/:id', (req, res) => {
         );
     } else {
         db.run(
-            `UPDATE users SET username = ?, role = ? WHERE id = ?`,
-            [username, hashedPassword, role, userId],
+            'UPDATE users SET username = ?, role = ? WHERE id = ?',
+            [username, role, userId],
             (err) => {
-                if (err) res.status(500).json({ success: false, message: 'Database error' });
+                if (err) return res.status(500).json({ success: false, message: 'Database error' });
                 res.json({ success: true });
             }
         );
@@ -225,7 +227,7 @@ app.get('/archive', (req, res) => {
 app.get('/issues', (req, res) => {
     if (!req.session.user) return res.redirect('/');
     db.all('SELECT * FROM issues ORDER BY created_at DESC', [], (err, issues) => {
-        if (err) return res.status(500).json({ success: false, message: 'Database error' });
+        if (err) return res.status(500).send('Database error');
         res.render('issues', { user: req.session.user, issues });
     });
 });
@@ -233,7 +235,7 @@ app.get('/issues', (req, res) => {
 app.get('/api/issues', (req, res) => {
     db.all('SELECT * FROM issues ORDER BY created_at DESC', [], (err, issues) => {
         if (err) return res.status(500).json({ success: false, message: 'Database error' });
-        res.json({ success: true, issues });
+        res.json(issues);
     });
 });
 
@@ -247,13 +249,14 @@ app.post('/issues', upload.single('image'), (req, res) => {
             if (err) return res.status(500).json({ success: false, message: 'Database error' });
             broadcast({ type: 'new_issue' });
             res.redirect('/issues');
-        });
-    });
+        }
+    );
+});
 
 app.get('/inspections', (req, res) => {
     if (!req.session.user) return res.redirect('/');
     db.all('SELECT * FROM inspections ORDER BY created_at DESC', [], (err, inspections) => {
-        if (err) return res.status(500).json({ success: false, message: 'Database error' });
+        if (err) return res.status(500).send('Database error');
         res.render('inspections', { user: req.session.user, inspections });
     });
 });
@@ -261,7 +264,7 @@ app.get('/inspections', (req, res) => {
 app.get('/api/inspections', (req, res) => {
     db.all('SELECT * FROM inspections ORDER BY created_at DESC', [], (err, inspections) => {
         if (err) return res.status(500).json({ success: false, message: 'Database error' });
-        res.json({ success: true, inspections });
+        res.json(inspections);
     });
 });
 
@@ -270,14 +273,15 @@ app.post('/inspections', (req, res) => {
     const userId = req.session.user.id;
     db.run(
         'INSERT INTO inspections (location, type, subtype, notes, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-        [location, type, subtype || null, notes || null, userId, new Date().toISOString(),
+        [location, type, subtype || null, notes || null, userId, new Date().toISOString()],
         (err) => {
             if (err) return res.status(500).json({ success: false, message: 'Database error' });
             broadcast({ type: 'new_inspection' });
             res.redirect('/inspections');
-        });
-    });
+        }
+    );
+});
 
-app.listen(3000, () => {
+server.listen(3000, () => {
     console.log('Server running on port 3000');
 });
