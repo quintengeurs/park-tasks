@@ -1,76 +1,283 @@
-### File: index.html
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Park Tasks</title>
-    <link rel="stylesheet" href="/css/styles.css">
-</head>
-<body>
-    <header>
-        <h1>Park Tasks</h1>
-        <nav>
-            <a href="/">Home</a>
-            <% if (user.role === 'Admin') { %>
-                <a href="/admin">Admin</a>
-            <% } %>
-            <a href="/staff">Staff</a>
-            <a href="/archive">Archive</a>
-            <a href="/issues">Issues</a>
-            <a href="/inspections">Inspections</a>
-            <a href="/logout">Logout</a>
-        </nav>
-        <div class="header-buttons">
-            <button id="raiseIssueBtn">Raise an Issue</button>
-            <% if (user && ['Admin', 'Operations Manager', 'Area Manager North', 'Area Manager South', 'Head Gardeners', 'Keepers'].includes(user.role) && (user.role !== 'Keepers' || user.rospa_trained)) { %>
-                <button id="recordInspectionBtn">Record Inspection/Induction</button>
-            <% } %>
-        </div>
-    </header>
-    <main>
-        <h2>Welcome, <%= user.username %></h2>
-        <div class="task-list">
-            <% tasks.forEach(task => { %>
-                <div class="task-card <%= task.urgency === 'High' ? 'high-urgency' : '' %>">
-                    <h3><%= task.title %></h3>
-                    <p><strong>Description:</strong> <%= task.description %></p>
-                    <p><strong>Location:</strong> <%= task.location %></p>
-                    <p><strong>Type:</strong> <%= task.type %></p>
-                    <p><strong>Urgency:</strong> <%= task.urgency %></p>
-                    <% if (task.image_path) { %>
-                        <img src="<%= task.image_path %>" alt="Task Image" class="task-image">
-                    <% } %>
-                    <% if (task.schedule) { %>
-                        <p><strong>Schedule:</strong> <%= task.schedule %></p>
-                    <% } %>
-                </div>
-            <% }) %>
-        </div>
-    </main>
-    <div id="issueModal" class="modal">
-        <div class="modal-content">
-            <span class="close">&times;</span>
-            <h2>Raise an Issue</h2>
-            <form id="issueForm" enctype="multipart/form-data" action="/issues" method="POST">
-                <label>Title:</label>
-                <input type="text" name="title" required>
-                <label>Description:</label>
-                <textarea name="description" required></textarea>
-                <label>Location:</label>
-                <input type="text" name="location" required>
-                <label>Image:</label>
-                <input type="file" name="image" accept="image/*">
-                <label>Urgency:</label>
-                <select name="urgency" required>
-                    <option value="Low">Low</option>
-                    <option value="Medium">Medium</option>
-                    <option value="High">High</option>
-                </select>
-                <button type="submit">Submit Issue</button>
-            </form>
-        </div>
-    </div>
-    <script src="/js/script.js"></script>
-</body>
-</html>
+const express = require('express');
+const sqlite3 = require('sqlite3').verbose();
+const bcrypt = require('bcrypt');
+const session = require('express-session');
+const multer = require('multer');
+const path = require('path');
+const WebSocket = require('ws');
+const app = express();
+
+// Middleware
+app.use(express.static('public'));
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+app.use(session({
+    secret: 'your-secret-key',
+    resave: false,
+    saveUninitialized: false
+}));
+
+// Multer for file uploads
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        cb(null, 'public/uploads/');
+    },
+    filename: (req, file, cb) => {
+        cb(null, Date.now() + path.extname(file.originalname));
+    }
+});
+const upload = multer({ storage });
+
+// Database
+const db = new sqlite3.Database('database.db');
+
+// Set view engine
+app.set('view engine', 'ejs');
+
+// WebSocket server
+const wss = new WebSocket.Server({ port: 8080 });
+wss.on('connection', (ws) => {
+    console.log('WebSocket client connected');
+    ws.on('close', () => console.log('WebSocket client disconnected'));
+});
+
+// Broadcast function
+function broadcast(message) {
+    wss.clients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify(message));
+        }
+    });
+}
+
+// Routes
+app.get('/', (req, res) => {
+    if (!req.session.user) return res.redirect('/login');
+    res.render('index', { user: req.session.user });
+});
+
+app.get('/login', (req, res) => {
+    res.render('login', { error: null });
+});
+
+app.post('/api/login', (req, res) => {
+    const { username, password } = req.body;
+    db.get('SELECT * FROM users WHERE username = ?', [username], (err, user) => {
+        if (err || !user || !bcrypt.compareSync(password, user.password)) {
+            return res.json({ success: false, message: 'Invalid credentials' });
+        }
+        req.session.user = user;
+        res.json({ success: true });
+    });
+});
+
+app.post('/api/logout', (req, res) => {
+    req.session.destroy();
+    res.json({ success: true });
+});
+
+app.get('/api/current-user', (req, res) => {
+    if (req.session.user) {
+        res.json(req.session.user);
+    } else {
+        res.json(null);
+    }
+});
+
+app.get('/admin', (req, res) => {
+    if (!req.session.user || req.session.user.role !== 'Admin') return res.redirect('/');
+    res.render('admin', { user: req.session.user });
+});
+
+app.get('/api/tasks', (req, res) => {
+    db.all('SELECT * FROM tasks', [], (err, tasks) => {
+        if (err) return res.status(500).json({ success: false, message: 'Database error' });
+        res.json(tasks);
+    });
+});
+
+app.post('/api/tasks', upload.single('image'), (req, res) => {
+    const { title, description, type, custom_type, urgency, due_date, season, allocated_to, recurrence } = req.body;
+    const taskType = custom_type || type;
+    const imagePath = req.file ? `/uploads/${req.file.filename}` : null;
+    db.run(
+        `INSERT INTO tasks (title, description, type, urgency, image, due_date, season, allocated_to, recurrence, status, archived, completed) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [title, description, taskType, urgency, imagePath, due_date || null, season || 'all', allocated_to || null, recurrence || null, 'active', false, false],
+        function(err) {
+            if (err) return res.status(500).json({ success: false, message: 'Database error' });
+            broadcast({ type: 'new_task' });
+            res.json({ success: true, id: this.lastID });
+        }
+    );
+});
+
+app.put('/api/tasks/:id', upload.single('image'), (req, res) => {
+    const taskId = req.params.id;
+    const { title, description, type, custom_type, urgency, due_date, season, allocated_to, recurrence, existing_image } = req.body;
+    const taskType = custom_type || type;
+    const imagePath = req.file ? `/uploads/${req.file.filename}` : existing_image;
+    db.run(
+        `UPDATE tasks SET title = ?, description = ?, type = ?, urgency = ?, image = ?, due_date = ?, season = ?, allocated_to = ?, recurrence = ? WHERE id = ?`,
+        [title, description, taskType, urgency, imagePath, due_date || null, season || 'all', allocated_to || null, recurrence || null, taskId],
+        (err) => {
+            if (err) return res.status(500).json({ success: false, message: 'Database error' });
+            broadcast({ type: 'updated_task' });
+            res.json({ success: true });
+        }
+    );
+});
+
+app.post('/api/tasks/:id/complete', (req, res) => {
+    const taskId = req.params.id;
+    db.run('UPDATE tasks SET completed = 1, completed_date = datetime("now") WHERE id = ?', [taskId], (err) => {
+        if (err) return res.status(500).json({ success: false, message: 'Database error' });
+        broadcast({ type: 'updated_task' });
+        res.json({ success: true });
+    });
+});
+
+app.post('/api/tasks/:id', (req, res) => {
+    const taskId = req.params.id;
+    db.run('UPDATE tasks SET archived = true WHERE id = ?', [taskId], (err) => {
+        if (err) return res.status(500).json({ success: false, message: 'Database error' });
+        broadcast({ type: 'updated_task' });
+        res.json({ success: true });
+    });
+});
+
+app.delete('/api/tasks/:id', (req, res) => {
+    const taskId = req.params.id;
+    db.run('DELETE FROM tasks WHERE id = ?', [taskId], (err) => {
+        if (err) return res.status(500).json({ success: false, message: 'Database error' });
+        broadcast({ type: 'updated_task' });
+        res.json({ success: true });
+    });
+});
+
+app.get('/staff', (req, res) => {
+    if (!req.session.user) return res.redirect('/');
+    res.render('staff', { user: req.session.user });
+});
+
+app.get('/api/users', (req, res) => {
+    db.all('SELECT id, username, role FROM users', [], (err, users) => {
+        if (err) return res.status(500).json({ success: false, message: 'Database error' });
+        res.json(users);
+    });
+
+app.post('/api/users', (req, res) => {
+    const { username, password, role } = req.body;
+    const hashedPassword = bcrypt.hashSync(password, 10);
+    db.run('SELECT username FROM users WHERE username = ?', [username], (err, existingUser) => {
+        if (existingUser) {
+            return res.json({ success: false, message: 'Username already exists' });
+        }
+        db.run(
+            'INSERT INTO users (username, password, role) VALUES (?, ?, ?)',
+            [username, hashedPassword, role],
+            function(err) {
+                if (err) return res.status(500).json({ success: false, message: 'Database error' });
+                res.json({ success: true, id: this.lastID });
+            }
+        );
+    });
+});
+
+app.put('/api/users/:id', (req, res) => {
+    const userId = req.params.id;
+    const { username, password, role } = req.body;
+    const hashedPassword = password ? bcrypt.hashSync(password, 10) : null;
+    if (hashedPassword) {
+        db.run(
+            'UPDATE users SET username = ?, password = ?, role = ? WHERE id = ?',
+            [username, hashedPassword, role, userId],
+            (err) => {
+                if (err) return res.status(500).json({ success: false, message: 'Database error' });
+                res.json({ success: true });
+            }
+        );
+    } else {
+        db.run(
+            `UPDATE users SET username = ?, role = ? WHERE id = ?`,
+            [username, hashedPassword, role, userId],
+            (err) => {
+                if (err) res.status(500).json({ success: false, message: 'Database error' });
+                res.json({ success: true });
+            }
+        );
+    }
+});
+
+app.delete('/api/users/:id', (req, res) => {
+    const userId = req.params.id;
+    db.run('DELETE FROM users WHERE id = ?', [userId], (err) => {
+        if (err) return res.status(500).json({ success: false, message: 'Database error' });
+        res.json({ success: true });
+    });
+});
+
+app.get('/archive', (req, res) => {
+    if (!req.session.user) return res.redirect('/');
+    res.render('archive', { user: req.session.user });
+});
+
+app.get('/issues', (req, res) => {
+    if (!req.session.user) return res.redirect('/');
+    db.all('SELECT * FROM issues ORDER BY created_at DESC', [], (err, issues) => {
+        if (err) return res.status(500).json({ success: false, message: 'Database error' });
+        res.render('issues', { user: req.session.user, issues });
+    });
+});
+
+app.get('/api/issues', (req, res) => {
+    db.all('SELECT * FROM issues ORDER BY created_at DESC', [], (err, issues) => {
+        if (err) return res.status(500).json({ success: false, message: 'Database error' });
+        res.json({ success: true, issues });
+    });
+});
+
+app.post('/issues', upload.single('image'), (req, res) => {
+    const { title, description, location, urgency } = req.body;
+    const imagePath = req.file ? `/uploads/${req.file.filename}` : null;
+    db.run(
+        'INSERT INTO issues (title, description, location, image_path, urgency, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        [title, description, location, imagePath, urgency, new Date().toISOString()],
+        (err) => {
+            if (err) return res.status(500).json({ success: false, message: 'Database error' });
+            broadcast({ type: 'new_issue' });
+            res.redirect('/issues');
+        });
+    });
+
+app.get('/inspections', (req, res) => {
+    if (!req.session.user) return res.redirect('/');
+    db.all('SELECT * FROM inspections ORDER BY created_at DESC', [], (err, inspections) => {
+        if (err) return res.status(500).json({ success: false, message: 'Database error' });
+        res.render('inspections', { user: req.session.user, inspections });
+    });
+});
+
+app.get('/api/inspections', (req, res) => {
+    db.all('SELECT * FROM inspections ORDER BY created_at DESC', [], (err, inspections) => {
+        if (err) return res.status(500).json({ success: false, message: 'Database error' });
+        res.json({ success: true, inspections });
+    });
+});
+
+app.post('/inspections', (req, res) => {
+    const { location, type, subtype, notes } = req.body;
+    const userId = req.session.user.id;
+    db.run(
+        'INSERT INTO inspections (location, type, subtype, notes, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        [location, type, subtype || null, notes || null, userId, new Date().toISOString(),
+        (err) => {
+            if (err) return res.status(500).json({ success: false, message: 'Database error' });
+            broadcast({ type: 'new_inspection' });
+            res.redirect('/inspections');
+        });
+    });
+
+app.listen(3000, () => {
+    console.log('Server running on port 3000');
+});
