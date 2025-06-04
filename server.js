@@ -72,6 +72,62 @@ app.get('/', (req, res) => {
     res.render('index', { user: req.session.user });
 });
 
+app.get('/setup', (req, res) => {
+    db.serialize(() => {
+        db.run(`CREATE TABLE IF NOT EXISTS tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            description TEXT,
+            type TEXT NOT NULL,
+            urgency TEXT,
+            image TEXT,
+            due_date TEXT,
+            season TEXT,
+            allocated_to TEXT,
+            recurrence TEXT,
+            status TEXT CHECK(status IN ('active', 'completed')),
+            archived BOOLEAN NOT NULL DEFAULT 0,
+            completed BOOLEAN NOT NULL DEFAULT 0,
+            completed_date TEXT,
+            completion_note TEXT,
+            completion_image TEXT,
+            original_task_id INTEGER
+        )`);
+        db.run(`CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE,
+            password TEXT NOT NULL,
+            role TEXT NOT NULL,
+            rospa_trained INTEGER DEFAULT 0
+        )`);
+        db.run(`CREATE TABLE IF NOT EXISTS issues (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL,
+            location TEXT NOT NULL,
+            image_path TEXT,
+            urgency TEXT CHECK(urgency IN ('Low', 'Medium', 'High')),
+            created_at TEXT
+        )`);
+        db.run(`CREATE TABLE IF NOT EXISTS inspections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            location TEXT NOT NULL,
+            type TEXT NOT NULL,
+            subtype TEXT,
+            notes TEXT,
+            user_id INTEGER,
+            created_at TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )`);
+        const hashedPassword = bcrypt.hashSync('admin123', 10);
+        db.run(`INSERT OR IGNORE INTO users (username, password, role) 
+                VALUES ('admin', ?, 'Admin')`, [hashedPassword]);
+        db.run(`INSERT OR IGNORE INTO tasks (title, type, urgency, season, status) 
+                VALUES ('Test Task', 'maintenance', 'normal', 'all', 'active')`);
+    });
+    res.send('Database initialized');
+});
+
 app.get('/login', (req, res) => {
     res.render('login', { error: null });
 });
