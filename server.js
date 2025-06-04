@@ -6,19 +6,33 @@ const session = require('express-session');
 const multer = require('multer');
 const path = require('path');
 const WebSocket = require('ws');
+const Sequelize = require('sequelize');
+const SequelizeStore = require('connect-session-sequelize')(session.Store);
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-// Middleware
-app.use(express.static('public'));
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
+// Sequelize setup
+const sequelize = new Sequelize({
+    dialect: 'sqlite',
+    storage: 'database.db'
+});
+
+// Session middleware with Sequelize store
 app.use(session({
     secret: 'your-secret-key',
     resave: false,
-    saveUninitialized: false
+    saveUninitialized: false,
+    store: new SequelizeStore({
+        db: sequelize,
+        tableName: 'sessions', // Optional: custom table name
+        checkExpirationInterval: 15 * 60 * 1000, // Clean up expired sessions every 15 minutes
+        expiration: 24 * 60 * 60 * 1000 // Sessions expire after 24 hours
+    })
 }));
+
+// Sync Sequelize to create the sessions table
+sequelize.sync();
 
 // Multer for file uploads
 const storage = multer.diskStorage({
