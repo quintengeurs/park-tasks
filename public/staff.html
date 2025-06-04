@@ -3,48 +3,51 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Staff Management</title>
-    <link rel="stylesheet" href="css/styles.css">
+    <title>Staff - Park Tasks</title>
+    <link rel="stylesheet" href="/css/styles.css">
 </head>
 <body>
-    <nav id="navbar" class="navbar"></nav>
-    <div class="container">
-        <h1>Staff Management</h1>
-        <button id="add-user-btn">Add New User</button>
-        <div id="users-list" class="users-list"></div>
-    </div>
-    <div id="user-modal" class="modal" style="display: none;">
-        <div class="modal-content">
-            <span id="close-modal" class="close">&times;</span>
-            <h2 id="modal-title">Add User</h2>
-            <form id="user-form">
-                <input type="text" name="username" placeholder="Username" required>
-                <input type="password" name="password" placeholder="Password" required>
-                <select name="role" required>
-                    <option value="" disabled selected>Select Role</option>
-                    <option value="admin">Admin</option>
-                    <option value="staff">Operations Manager</option>
-                    <option value="manager">Area Manager North</option>
-                    <option value="staff">Area Manager South</option>
-                    <option value="staff">Head Gardener Clissold</option>
-                    <option value="staff">Head Gardener Springfield</option>
-                    <option value="staff">Head Gardener Millfields</option>
-                    <option value="staff">Head Gardener London Fields</option>
-                    <option value="staff">Head Gardener Haggerston</option>
-                    <option value="staff">Gardener Clissold</option>
-                    <option value="staff">Gardener Springfield</option>
-                    <option value="staff">Gardener Millfields</option>
-                    <option value="staff">Gardener London Fields</option>
-                    <option value="staff">Gardener Haggerston</option>
-                    <option value="staff">Keeper</option>
-                    <option value="staff">Litterpick</option>
-                </select>
-                <input type="hidden" name="id">
-                <button type="submit">Save</button>
-            </form>
-            <p id="modal-error" style="color: red; display: none;"></p>
+    <header>
+        <h1>Staff Tasks</h1>
+        <nav>
+            <a href="/">Home</a>
+            <% if (user.role === 'Admin') { %>
+                <a href="/admin">Admin</a>
+            <% } %>
+            <a href="/staff">Staff</a>
+            <a href="/archive">Archive</a>
+            <a href="/issues">Issues</a>
+            <a href="/inspections">Inspections</a>
+            <a href="/logout">Logout</a>
+        </nav>
+    </header>
+    <main>
+        <h2>Assigned Tasks</h2>
+        <div class="task-list">
+            <% tasks.forEach(task => { %>
+                <div class="task-card <%= task.urgency === 'High' ? 'high-urgency' : '' %>">
+                    <h3><%= task.title %></h3>
+                    <p><strong>Description:</strong> <%= task.description %></p>
+                    <p><strong>Location:</strong> <%= task.location %></p>
+                    <p><strong>Type:</strong> <%= task.type %></p>
+                    <p><strong>Urgency:</strong> <%= task.urgency %></p>
+                    <% if (task.image_path) { %>
+                        <img src="<%= task.image_path %>" alt="Task Image" class="task-image">
+                    <% } %>
+                    <% if (task.schedule) { %>
+                        <p><strong>Schedule:</strong> <%= task.schedule %></p>
+                    <% } %>
+                    <form action="/staff/complete-task/<%= task.id %>" method="POST" enctype="multipart/form-data">
+                        <label>Completion Note:</label>
+                        <textarea name="completion_note"></textarea>
+                        <label>Completion Image:</label>
+                        <input type="file" name="completion_image" accept="image/*">
+                        <button type="submit">Mark as Completed</button>
+                    </form>
+                </div>
+            <% }) %>
         </div>
-    </div>
-    <script src="js/scripts.js"></script>
+    </main>
+    <script src="/js/script.js"></script>
 </body>
 </html>
