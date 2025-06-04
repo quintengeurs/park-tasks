@@ -1,4 +1,3 @@
-### File: index.html
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -10,16 +9,8 @@
 <body>
     <header>
         <h1>Park Tasks</h1>
-        <nav>
-            <a href="/">Home</a>
-            <% if (user.role === 'Admin') { %>
-                <a href="/admin">Admin</a>
-            <% } %>
-            <a href="/staff">Staff</a>
-            <a href="/archive">Archive</a>
-            <a href="/issues">Issues</a>
-            <a href="/inspections">Inspections</a>
-            <a href="/logout">Logout</a>
+        <nav id="navbar">
+            <!-- Dynamically populated by script.js -->
         </nav>
         <div class="header-buttons">
             <button id="raiseIssueBtn">Raise an Issue</button>
@@ -30,27 +21,22 @@
     </header>
     <main>
         <h2>Welcome, <%= user.username %></h2>
-        <div class="task-list">
-            <% tasks.forEach(task => { %>
-                <div class="task-card <%= task.urgency === 'High' ? 'high-urgency' : '' %>">
-                    <h3><%= task.title %></h3>
-                    <p><strong>Description:</strong> <%= task.description %></p>
-                    <p><strong>Location:</strong> <%= task.location %></p>
-                    <p><strong>Type:</strong> <%= task.type %></p>
-                    <p><strong>Urgency:</strong> <%= task.urgency %></p>
-                    <% if (task.image_path) { %>
-                        <img src="<%= task.image_path %>" alt="Task Image" class="task-image">
-                    <% } %>
-                    <% if (task.schedule) { %>
-                        <p><strong>Schedule:</strong> <%= task.schedule %></p>
-                    <% } %>
-                </div>
-            <% }) %>
+        <div class="filters">
+            <button class="filter-btn" data-type="all">All</button>
+            <button class="filter-btn" data-type="maintenance">Maintenance</button>
+            <button class="filter-btn" data-type="cleansing">Cleansing and Litter</button>
+            <button class="filter-btn" data-type="planting">Planting</button>
+            <% if (user.role !== 'Admin') { %>
+                <button class="filter-btn" data-type="allocated">Allocated To Me</button>
+            <% } %>
+        </div>
+        <div id="tasks">
+            <div class="tasks"></div>
         </div>
     </main>
     <div id="issueModal" class="modal">
         <div class="modal-content">
-            <span class="close">&times;</span>
+            <span class="close">×</span>
             <h2>Raise an Issue</h2>
             <form id="issueForm" enctype="multipart/form-data" action="/issues" method="POST">
                 <label>Title:</label>
