@@ -7,6 +7,7 @@ const WebSocket = require('ws');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const { Sequelize } = require('sequelize'); // Added for SequelizeStore
 
 const app = express();
 const port = process.env.PORT || 10000;
@@ -67,7 +68,7 @@ db.serialize(() => {
     `);
 });
 
-// Multer setup for file uploads
+// Multer setup
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
         const dir = 'public/uploads/';
@@ -80,14 +81,12 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-// Session store
-const sessionStore = new SequelizeStore({
-    db: {
-        dialect: 'sqlite',
-        storage: dbPath
-    },
-    tableName: 'sessions'
+// Sequelize for session store
+const sequelize = new Sequelize({
+    dialect: 'sqlite',
+    storage: dbPath
 });
+const sessionStore = new SequelizeStore({ db: sequelize });
 sessionStore.sync();
 
 // Middleware
@@ -126,6 +125,7 @@ app.get('/archive', ensureAuthenticated, (req, res) => res.sendFile(path.join(__
 app.get('/staff', ensureAuthenticated, (req, res) => res.sendFile(path.join(__dirname, 'public', 'staff.html')));
 app.get('/issues', ensureAuthenticated, (req, res) => res.sendFile(path.join(__dirname, 'public', 'issues.html')));
 app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'public', 'login.html')));
+
 
 // Login
 app.post('/api/login', (req, res) => {
@@ -457,14 +457,30 @@ app.post('/api/tasks/from-issue', ensureAuthenticated, upload.single('image'), (
 });
 
 // Issues
-app.get('/api/issues', ensureAuthenticated, (req, res) => {
-    db.all('SELECT * FROM issues ORDER BY created_at DESC', [], (err, issues) => {
-        if (err) {
-            console.error('Issues fetch error:', err);
-            return res.json({ success: false, message: 'Server error' });
+app.post('/api/issues', ensureAuthenticated, upload.single('image'), (req, res) => {
+    const { location, urgency, description, raised_by } = req.body;
+    const image = req.file ? `/uploads/${req.file.filename}` : null;
+    const created_at = new Date().toISOString();
+    if (!location || !urgency || !raised_by) {
+        console.error('Missing required fields for issue:', { location, urgency, raised_by });
+        return res.json({ success: false, message: 'Location, urgency, and raised_by are required' });
+    }
+    db.run(
+        `INSERT INTO issues (location, urgency, image, description, raised_by, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+        [location, urgency, image, description || null, raised_by, created_at],
+        function(err) {
+            if (err) {
+                console.error('Issue creation error:', err);
+                return res.json({ success: false, message: 'Failed to add issue' });
+            }
+            wss.clients.forEach(client => {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.send(JSON.stringify({ type: 'new_issue', id: this.lastID }));
+                }
+            });
+            res.json({ success: true });
         }
-        res.json(issues);
-    });
+    );
 });
 
 app.post('/api/issues', ensureAuthenticated, upload.single('image'), (req, res) => {
