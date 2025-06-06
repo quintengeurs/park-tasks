@@ -21,8 +21,8 @@ const sequelize = new Sequelize({
 const store = new SequelizeStore({
     db: sequelize,
     tableName: 'Sessions',
-    checkExpirationInterval: 15 * 60 * 1000, // Clean expired sessions every 15 minutes
-    expiration: 24 * 60 * 60 * 1000 // Sessions expire after 24 hours
+    checkExpirationInterval: 15 * 60 * 1000,
+    expiration: 24 * 60 * 60 * 1000
 });
 
 // Session middleware
@@ -34,7 +34,7 @@ app.use(session({
     cookie: {
         secure: process.env.NODE_ENV === 'production',
         sameSite: process.env.NODE_ENV === 'production' ? 'lax' : 'lax',
-        maxAge: 24 * 60 * 60 * 1000 // 24 hours
+        maxAge: 24 * 60 * 60 * 1000
     }
 }));
 
@@ -76,7 +76,6 @@ sequelize.sync().then(async () => {
     console.log('Connected to SQLite database');
     store.sync();
     try {
-        // Add permissions column if not exists
         const [results] = await sequelize.query("PRAGMA table_info(Users)");
         const hasPermissions = results.some(col => col.name === 'permissions');
         if (!hasPermissions) {
@@ -84,7 +83,6 @@ sequelize.sync().then(async () => {
             await sequelize.query('ALTER TABLE Users ADD COLUMN permissions JSON');
             console.log('Permissions column added successfully');
         }
-        // Seed default admin user
         const users = await User.findAll();
         if (users.length === 0) {
             console.log('No users found, seeding default admin user...');
@@ -105,14 +103,18 @@ sequelize.sync().then(async () => {
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Multer setup for file uploads
+// Log all incoming requests
+app.use((req, res, next) => {
+    console.log(`Incoming request: ${req.method} ${req.path}, SessionID: ${req.sessionID}`);
+    next();
+});
+
 const storage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, 'public/uploads/'),
     filename: (req, file, cb) => cb(null, Date.now() + path.extname(file.originalname))
 });
 const upload = multer({ storage });
 
-// Authentication middleware
 const requireAuth = async (req, res, next) => {
     console.log(`Request: ${req.method} ${req.path}, SessionID: ${req.sessionID}, UserID: ${req.session.userId || 'none'}`);
     if (req.session.userId) {
