@@ -1,437 +1,425 @@
-const express = require('express');
-const sqlite3 = require('sqlite3').verbose();
-const session = require('express-session');
-const bcrypt = require('bcrypt');
-const WebSocket = require('ws');
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
+document.addEventListener('DOMContentLoaded', () => {
+    const navbar = document.getElementById('navbar');
+    const tasksContainer = document.getElementById('tasks');
+    const adminTasksContainer = document.getElementById('admin-tasks');
+    const archiveTasksContainer = document.getElementById('archive-tasks');
+    const issuesContainer = document.getElementById('issues');
+    const dueTodayTaskForm = document.getElementById('due-today-task-form');
+    const scheduledTaskForm = document.getElementById('scheduled-task-form');
+    const editTaskForm = document.getElementById('edit-task-form');
+    const editTaskModal = document.getElementById('edit-task-modal');
+    const closeEditModal = document.getElementById('close-edit-modal');
+    const usersList = document.getElementById('users-list');
+    const userForm = document.getElementById('user-form');
+    const userModal = document.getElementById('user-modal');
+    const addUserBtn = document.getElementById('add-user-btn');
+    const closeModal = document.getElementById('close-modal');
+    const modalTitle = document.getElementById('modal-title');
+    const loginForm = document.getElementById('login-form');
+    const issueModal = document.getElementById('issue-modal');
+    const closeIssueModal = document.getElementById('close-issue-modal');
+    const issueForm = document.getElementById('issue-form');
+    const raiseIssueBtn = document.getElementById('raise-issue-btn');
+    const completeTaskModal = document.getElementById('complete-task-modal');
+    const closeCompleteModal = document.getElementById('close-complete-modal');
+    const completeTaskForm = document.getElementById('complete-task-form');
 
-const app = express();
-const port = process.env.PORT || 3000;
-
-// Database setup
-const db = new sqlite3.Database('./database.db', (err) => {
-    if (err) console.error('Database connection error:', err);
-    else console.log('Connected to SQLite database');
-});
-
-db.serialize(() => {
-    db.run(`
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL,
-            role TEXT NOT NULL,
-            permissions TEXT DEFAULT '["tasks"]'
-        )
-    `);
-    db.run(`
-        CREATE TABLE IF NOT EXISTS tasks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            type TEXT NOT NULL,
-            description TEXT,
-            due_date TEXT,
-            urgency TEXT NOT NULL,
-            allocated_to TEXT,
-            season TEXT DEFAULT 'all',
-            image TEXT,
-            completed BOOLEAN DEFAULT FALSE,
-            archived BOOLEAN DEFAULT FALSE,
-            recurrence TEXT,
-            original_task_id INTEGER,
-            completion_image TEXT,
-            completion_note TEXT
-        )
-    `);
-    db.run(`
-        CREATE TABLE IF NOT EXISTS issues (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            location TEXT NOT NULL,
-            urgency TEXT NOT NULL,
-            image TEXT,
-            description TEXT,
-            raised_by TEXT NOT NULL,
-            created_at TEXT NOT NULL
-        )
-    `);
-});
-
-// Multer setup for file uploads
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        const dir = 'public/uploads/';
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-        cb(null, dir);
-    },
-    filename: (req, file, cb) => {
-        cb(null, Date.now() + path.extname(file.originalname));
+    // Toast notification
+    function showToast(message) {
+        const toast = document.createElement('div');
+        toast.className = 'toast';
+        toast.textContent = message;
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 3000);
     }
-});
-const upload = multer({ storage });
 
-// Middleware
-app.use(express.static('public'));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(session({
-    secret: process.env.SESSION_SECRET || 'your-secret-key',
-    resave: false,
-    saveUninitialized: false,
-    cookie: { secure: process.env.NODE_ENV === 'production' }
-}));
-app.use((req, res, next) => {
-    res.header('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.header('Pragma', 'no-cache');
-    res.header('Expires', '0');
-    next();
-});
-
-// Authentication middleware
-function ensureAuthenticated(req, res, next) {
-    if (req.session.userId) return next();
-    res.status(401).json({ success: false, message: 'Unauthorized' });
-}
-
-// WebSocket server
-const server = app.listen(port, () => console.log(`Server running on port ${port}`));
-const wss = new WebSocket.Server({ server });
-
-// Routes
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-app.get('/admin', ensureAuthenticated, (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
-app.get('/archive', ensureAuthenticated, (req, res) => res.sendFile(path.join(__dirname, 'public', 'archive.html')));
-app.get('/staff', ensureAuthenticated, (req, res) => res.sendFile(path.join(__dirname, 'public', 'staff.html')));
-app.get('/issues', ensureAuthenticated, (req, res) => res.sendFile(path.join(__dirname, 'public', 'issues.html')));
-app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'public', 'login.html')));
-
-// Login
-app.post('/api/login', (req, res) => {
-    const { username, password } = req.body;
-    db.get('SELECT * FROM users WHERE username = ?', [username], async (err, user) => {
-        if (err) {
-            console.error('Login error:', err);
-            return res.json({ success: false, message: 'Server error' });
-        }
-        if (!user || !(await bcrypt.compare(password, user.password))) {
-            return res.json({ success: false, message: 'Invalid credentials' });
-        }
-        req.session.userId = user.id;
-        res.json({ success: true });
-    });
-});
-
-// Logout
-app.post('/api/logout', (req, res) => {
-    req.session.destroy(err => {
-        if (err) {
-            console.error('Logout error:', err);
-            return res.json({ success: false, message: 'Logout failed' });
-        }
-        res.json({ success: true });
-    });
-});
-
-// Current user
-app.get('/api/current-user', (req, res) => {
-    if (!req.session.userId) return res.json(null);
-    db.get('SELECT id, username, role, permissions FROM users WHERE id = ?', [req.session.userId], (err, user) => {
-        if (err) {
-            console.error('Current user error:', err);
-            return res.json(null);
-        }
-        if (!user) return res.json(null);
-        user.permissions = JSON.parse(user.permissions || '["tasks"]');
-        res.json(user);
-    });
-});
-
-// Users
-app.get('/api/users', ensureAuthenticated, (req, res) => {
-    db.all('SELECT id, username, role, permissions FROM users', [], (err, users) => {
-        if (err) {
-            console.error('Users fetch error:', err);
-            return res.json({ success: false, message: 'Server error' });
-        }
-        users.forEach(user => {
-            user.permissions = JSON.parse(user.permissions || '["tasks"]');
-        });
-        res.json(users);
-    });
-});
-
-app.post('/api/users', ensureAuthenticated, async (req, res) => {
-    const { username, password, role, permissions } = req.body;
-    if (!username || !password || !role || !permissions) {
-        return res.json({ success: false, message: 'Missing required fields' });
-    }
-    try {
-        const hashedPassword = await bcrypt.hash(password, 10);
-        db.run(
-            'INSERT INTO users (username, password, role, permissions) VALUES (?, ?, ?, ?)',
-            [username, hashedPassword, role, JSON.stringify(permissions)],
-            function(err) {
-                if (err) {
-                    console.error('User creation error:', err);
-                    return res.json({ success: false, message: 'Failed to create user' });
+    // Login page
+    if (loginForm && window.location.pathname === '/login') {
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const username = loginForm.querySelector('#username').value;
+            const password = loginForm.querySelector('#password').value;
+            const errorElement = document.getElementById('login-error');
+            try {
+                const res = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    window.location.href = '/';
+                } else {
+                    errorElement.style.display = 'block';
+                    errorElement.textContent = data.message || 'Invalid credentials';
                 }
-                res.json({ success: true });
+            } catch (err) {
+                console.error('Login error:', err);
+                errorElement.style.display = 'block';
+                errorElement.textContent = 'Server error';
             }
-        );
-    } catch (err) {
-        console.error('User creation error:', err);
-        res.json({ success: false, message: 'Server error' });
+        });
     }
-});
 
-app.put('/api/users/:id', ensureAuthenticated, async (req, res) => {
-    const { username, password, role, permissions } = req.body;
-    let query = 'UPDATE users SET username = ?, role = ?, permissions = ?';
-    const params = [username, role, JSON.stringify(permissions)];
-    if (password) {
-        query += ', password = ?';
-        params.push(await bcrypt.hash(password, 10));
+    // Navbar setup
+    if (navbar) {
+        fetch('/api/current-user')
+            .then(res => res.json())
+            .then(user => {
+                if (user) {
+                    const permissions = user.permissions || ['tasks'];
+                    navbar.innerHTML = `
+                        ${permissions.includes('tasks') ? '<a href="/">Tasks</a>' : ''}
+                        ${permissions.includes('admin') ? '<a href="/admin">Admin</a>' : ''}
+                        ${permissions.includes('archive') ? '<a href="/archive">Archive</a>' : ''}
+                        ${permissions.includes('staff') ? '<a href="/staff">Staff Management</a>' : ''}
+                        ${permissions.includes('issues') ? '<a href="/issues">Issues</a>' : ''}
+                        <button id="logout-btn">Logout</button>
+                    `;
+                    const logoutBtn = document.getElementById('logout-btn');
+                    logoutBtn.addEventListener('click', async () => {
+                        try {
+                            const res = await fetch('/api/logout', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                credentials: 'include'
+                            });
+                            const data = await res.json();
+                            if (data.success) {
+                                window.location.href = '/login';
+                            } else {
+                                console.error('Logout failed:', data.message);
+                            }
+                        } catch (err) {
+                            console.error('Logout error:', err);
+                        }
+                    });
+                } else {
+                    window.location.href = '/login';
+                }
+            })
+            .catch(err => {
+                console.error('Navbar fetch error:', err);
+                window.location.href = '/login';
+            });
     }
-    query += ' WHERE id = ?';
-    params.push(req.params.id);
-    db.run(query, params, function(err) {
-        if (err) {
-            console.error('User update error:', err);
-            return res.json({ success: false, message: 'Failed to update user' });
-        }
-        if (this.changes === 0) {
-            return res.json({ success: false, message: 'User not found' });
-        }
-        res.json({ success: true });
-    });
-});
 
-app.delete('/api/users/:id', ensureAuthenticated, (req, res) => {
-    db.run('DELETE FROM users WHERE id = ?', [req.params.id], function(err) {
-        if (err) {
-            console.error('User deletion error:', err);
-            return res.json({ success: false, message: 'Failed to delete user' });
-        }
-        if (this.changes === 0) {
-            return res.json({ success: false, message: 'User not found' });
-        }
-        res.json({ success: true });
-    });
-});
-
-// Tasks
-app.get('/api/tasks', ensureAuthenticated, (req, res) => {
-    db.all('SELECT * FROM tasks', [], (err, tasks) => {
-        if (err) {
-            console.error('Tasks fetch error:', err);
-            return res.json({ success: false, message: 'Server error' });
-        }
-        res.json(tasks);
-    });
-});
-
-app.post('/api/tasks', ensureAuthenticated, upload.single('image'), (req, res) => {
-    const { title, type, description, due_date, urgency, allocated_to, season, recurrence } = req.body;
-    const image = req.file ? `/uploads/${req.file.filename}` : null;
-    const today = new Date().toISOString().split('T')[0];
-    if (!title || !type || !urgency) {
-        console.error('Missing required fields');
-        return res.json({ success: false, message: 'Title, type, and urgency are required' });
+    // Determine current season
+    function getCurrentSeason() {
+        const month = new Date().getMonth();
+        if (month >= 2 && month <= 4) return 'spring';
+        if (month >= 5 && month <= 7) return 'summer';
+        if (month >= 8 && month <= 10) return 'autumn';
+        return 'winter';
     }
-    if (!due_date && (!season || season === 'all') && due_date !== today) {
-        console.error('Validation failed: due date or specific season required');
-        return res.json({ success: false, message: 'Either a due date or a specific season is required' });
-    }
-    db.run(
-        `INSERT INTO tasks (title, type, description, due_date, urgency, allocated_to, season, image, completed, archived, recurrence) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [title, type, description || null, due_date || null, urgency, allocated_to || null, season || 'all', image, false, false, recurrence || null],
-        function(err) {
-            if (err) {
-                console.error('Task insertion error:', err);
-                return res.json({ success: false, message: 'Failed to add task' });
+
+    // WebSocket setup
+    let ws;
+    function connectWebSocket() {
+        ws = new WebSocket(`wss://${window.location.host}/`);
+        ws.onopen = () => console.log('WebSocket connected');
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            console.log('WebSocket message:', data);
+            if ((data.type === 'new_task' || data.type === 'updated_task') && tasksContainer && window.location.pathname === '/') {
+                loadTasks(document.querySelector('.filter-btn.active')?.dataset.type || 'maintenance');
             }
-            wss.clients.forEach(client => {
-                if (client.readyState === WebSocket.OPEN) {
-                    client.send(JSON.stringify({ type: 'new_task', id: this.lastID }));
+            if ((data.type === 'new_task' || data.type === 'updated_task') && adminTasksContainer && window.location.pathname === '/admin') {
+                loadAdminTasks();
+            }
+            if ((data.type === 'new_task' || data.type === 'updated_task') && archiveTasksContainer && window.location.pathname === '/archive') {
+                loadArchiveTasks();
+            }
+            if ((data.type === 'new_issue' || data.type === 'updated_issue') && issuesContainer && window.location.pathname === '/issues') {
+                loadIssues();
+            }
+        };
+        ws.onclose = () => {
+            console.log('WebSocket disconnected, reconnecting...');
+            setTimeout(connectWebSocket, 5000);
+        };
+        ws.onerror = (err) => console.error('WebSocket error:', err);
+    }
+    if (tasksContainer || adminTasksContainer || archiveTasksContainer || issuesContainer) {
+        connectWebSocket();
+    }
+
+    // Admin page
+    if ((dueTodayTaskForm || scheduledTaskForm) && adminTasksContainer && window.location.pathname === '/admin') {
+        const dueTodayAllocatedTo = document.getElementById('due-today-allocated-to');
+        const scheduledAllocatedTo = document.getElementById('allocated-to');
+        const editAllocatedToSelect = document.getElementById('edit-allocated-to');
+        fetch('/api/users')
+            .then(res => res.json())
+            .then(users => {
+                const options = `<option value="">None</option>${users.map(user => `<option value="${user.username}">${user.username}</option>`).join('')}`;
+                dueTodayAllocatedTo.innerHTML = options;
+                scheduledAllocatedTo.innerHTML = options;
+                editAllocatedToSelect.innerHTML = options;
+            })
+            .catch(err => console.error('Fetch users error:', err));
+
+        const seasonButtons = document.querySelectorAll('.scheduled-task-form .season-btn');
+        const seasonInput = document.getElementById('season-input');
+        seasonButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                seasonButtons.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                seasonInput.value = btn.dataset.season;
+            });
+        });
+
+        const editSeasonButtons = editTaskForm.querySelectorAll('.season-btn');
+        const editSeasonInput = document.getElementById('edit-season-input');
+        editSeasonButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                editSeasonButtons.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                editSeasonInput.value = btn.dataset.season;
+            });
+        });
+
+        if (dueTodayTaskForm) {
+            dueTodayTaskForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const formData = new FormData(dueTodayTaskForm);
+                const today = new Date().toISOString().split('T')[0];
+                formData.append('due_date', today);
+                formData.append('season', 'all');
+                formData.append('recurrence', '');
+                try {
+                    const res = await fetch('/api/tasks', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        dueTodayTaskForm.reset();
+                        document.getElementById('due-today-form-error').style.display = 'none';
+                        showToast('Task created successfully!');
+                        loadAdminTasks();
+                    } else {
+                        document.getElementById('due-today-form-error').style.display = 'block';
+                        document.getElementById('due-today-form-error').textContent = data.message || 'Failed to add task';
+                    }
+                } catch (err) {
+                    console.error('Due today task creation error:', err);
+                    document.getElementById('due-today-form-error').style.display = 'block';
+                    document.getElementById('due-today-form-error').textContent = 'Server error';
                 }
             });
-            res.json({ success: true });
         }
-    );
-});
 
-app.put('/api/tasks/:id', ensureAuthenticated, upload.single('image'), (req, res) => {
-    const { title, type, description, due_date, urgency, allocated_to, season, recurrence, existing_image } = req.body;
-    const image = req.file ? `/uploads/${req.file.filename}` : existing_image;
-    db.run(
-        `UPDATE tasks SET title = ?, type = ?, description = ?, due_date = ?, urgency = ?, allocated_to = ?, season = ?, image = ?, recurrence = ? WHERE id = ?`,
-        [title, type, description || null, due_date || null, urgency, allocated_to || null, season || 'all', image, recurrence || null, req.params.id],
-        function(err) {
-            if (err) {
+        if (scheduledTaskForm) {
+            scheduledTaskForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const dueDate = document.getElementById('due_date').value;
+                const season = seasonInput.value;
+                if (!dueDate && (!season || season === 'all')) {
+                    document.getElementById('form-error').style.display = 'block';
+                    document.getElementById('form-error').textContent = 'Either a due date or a specific season is required';
+                    return;
+                }
+                const formData = new FormData(scheduledTaskForm);
+                try {
+                    const res = await fetch('/api/tasks', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        scheduledTaskForm.reset();
+                        seasonButtons.forEach(b => b.classList.remove('active'));
+                        seasonInput.value = 'all';
+                        document.getElementById('form-error').style.display = 'none';
+                        showToast('Task created successfully!');
+                        loadAdminTasks();
+                    } else {
+                        document.getElementById('form-error').style.display = 'block';
+                        document.getElementById('form-error').textContent = data.message || 'Failed to add task';
+                    }
+                } catch (err) {
+                    console.error('Scheduled task creation error:', err);
+                    document.getElementById('form-error').style.display = 'block';
+                    document.getElementById('form-error').textContent = 'Server error';
+                }
+            });
+        }
+
+        editTaskForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const taskId = editTaskForm.querySelector('input[name="id"]').value;
+            const dueDate = document.getElementById('edit-due_date').value;
+            const season = editSeasonInput.value;
+            if (!dueDate && (!season || season === 'all')) {
+                document.getElementById('edit-form-error').style.display = 'block';
+                document.getElementById('edit-form-error').textContent = 'Either a due date or a specific season is required';
+                return;
+            }
+            const formData = new FormData(editTaskForm);
+            formData.append('existing_image', editTaskForm.dataset.existingImage || '');
+            try {
+                const res = await fetch(`/api/tasks/${taskId}`, {
+                    method: 'PUT',
+                    body: formData
+                });
+                const data = await res.json();
+                if (data.success) {
+                    editTaskModal.style.display = 'none';
+                    editTaskForm.reset();
+                    editSeasonButtons.forEach(b => b.classList.remove('active'));
+                    editSeasonInput.value = 'all';
+                    document.getElementById('edit-form-error').style.display = 'none';
+                    showToast('Task updated successfully!');
+                    loadAdminTasks();
+                } else {
+                    document.getElementById('edit-form-error').style.display = 'block';
+                    document.getElementById('edit-form-error').textContent = data.message || 'Failed to update task';
+                }
+            } catch (err) {
                 console.error('Task update error:', err);
-                return res.json({ success: false, message: 'Failed to update task' });
-            }
-            if (this.changes === 0) {
-                return res.json({ success: false, message: 'Task not found' });
-            }
-            wss.clients.forEach(client => {
-                if (client.readyState === WebSocket.OPEN) {
-                    client.send(JSON.stringify({ type: 'updated_task', id: req.params.id }));
-                }
-            });
-            res.json({ success: true });
-        }
-    );
-});
-
-app.post('/api/tasks/:id/complete', ensureAuthenticated, upload.single('completion_image'), (req, res) => {
-    const { completion_note } = req.body;
-    const completion_image = req.file ? `/uploads/${req.file.filename}` : null;
-    if (!completion_image && !completion_note) {
-        return res.json({ success: false, message: 'Image or note required for completion' });
-    }
-    db.run(
-        `UPDATE tasks SET completed = ?, completion_image = ?, completion_note = ? WHERE id = ?`,
-        [true, completion_image, completion_note || null, req.params.id],
-        function(err) {
-            if (err) {
-                console.error('Task completion error:', err);
-                return res.json({ success: false, message: 'Failed to complete task' });
-            }
-            if (this.changes === 0) {
-                return res.json({ success: false, message: 'Task not found' });
-            }
-            wss.clients.forEach(client => {
-                if (client.readyState === WebSocket.OPEN) {
-                    client.send(JSON.stringify({ type: 'updated_task', id: req.params.id }));
-                }
-            });
-            res.json({ success: true });
-        }
-    );
-});
-
-app.post('/api/tasks/:id/archive', ensureAuthenticated, (req, res) => {
-    db.run(
-        `UPDATE tasks SET archived = ? WHERE id = ?`,
-        [true, req.params.id],
-        function(err) {
-            if (err) {
-                console.error('Task archive error:', err);
-                return res.json({ success: false, message: 'Failed to archive task' });
-            }
-            if (this.changes === 0) {
-                return res.json({ success: false, message: 'Task not found' });
-            }
-            wss.clients.forEach(client => {
-                if (client.readyState === WebSocket.OPEN) {
-                    client.send(JSON.stringify({ type: 'updated_task', id: req.params.id }));
-                }
-            });
-            res.json({ success: true });
-        }
-    );
-});
-
-app.delete('/api/tasks/:id', ensureAuthenticated, (req, res) => {
-    db.run('DELETE FROM tasks WHERE id = ?', [req.params.id], function(err) {
-        if (err) {
-            console.error('Task deletion error:', err);
-            return res.json({ success: false, message: 'Failed to delete task' });
-        }
-        if (this.changes === 0) {
-            return res.json({ success: false, message: 'Task not found' });
-        }
-        wss.clients.forEach(client => {
-            if (client.readyState === WebSocket.OPEN) {
-                client.send(JSON.stringify({ type: 'updated_task', id: req.params.id }));
+                document.getElementById('edit-form-error').style.display = 'block';
+                document.getElementById('edit-form-error').textContent = 'Server error';
             }
         });
-        res.json({ success: true });
-    });
-});
 
-app.post('/api/tasks/from-issue', ensureAuthenticated, upload.single('image'), (req, res) => {
-    const { title, type, description, due_date, urgency, allocated_to, season, recurrence, issue_id } = req.body;
-    const image = req.file ? `/uploads/${req.file.filename}` : null;
-    if (!title || !type || !urgency) {
-        return res.json({ success: false, message: 'Title, type, and urgency are required' });
-    }
-    db.run(
-        `INSERT INTO tasks (title, type, description, due_date, urgency, allocated_to, season, image, completed, archived, recurrence) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [title, type, description || null, due_date || null, urgency, allocated_to || null, season || 'all', image, false, false, recurrence || null],
-        function(err) {
-            if (err) {
-                console.error('Task from issue error:', err);
-                return res.json({ success: false, message: 'Failed to create task' });
-            }
-            db.run('DELETE FROM issues WHERE id = ?', [issue_id], (err) => {
-                if (err) console.error('Issue deletion error:', err);
-            });
-            wss.clients.forEach(client => {
-                if (client.readyState === WebSocket.OPEN) {
-                    client.send(JSON.stringify({ type: 'new_task', id: this.lastID }));
-                }
-            });
-            res.json({ success: true });
-        }
-    );
-});
-
-// Issues
-app.get('/api/issues', ensureAuthenticated, (req, res) => {
-    db.all('SELECT * FROM issues ORDER BY created_at DESC', [], (err, issues) => {
-        if (err) {
-            console.error('Issues fetch error:', err);
-            return res.json({ success: false, message: 'Server error' });
-        }
-        res.json(issues);
-    });
-});
-
-app.post('/api/issues', ensureAuthenticated, upload.single('image'), (req, res) => {
-    const { location, urgency, description, raised_by } = req.body;
-    const image = req.file ? `/uploads/${req.file.filename}` : null;
-    const created_at = new Date().toISOString();
-    if (!location || !urgency || !raised_by) {
-        return res.json({ success: false, message: 'Location, urgency, and raised_by are required' });
-    }
-    db.run(
-        `INSERT INTO issues (location, urgency, image, description, raised_by, created_at) 
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [location, urgency, image, description || null, raised_by, created_at],
-        function(err) {
-            if (err) {
-                console.error('Issue creation error:', err);
-                return res.json({ success: false, message: 'Failed to add issue' });
-            }
-            wss.clients.forEach(client => {
-                if (client.readyState === WebSocket.OPEN) {
-                    client.send(JSON.stringify({ type: 'new_issue', id: this.lastID }));
-                }
-            });
-            res.json({ success: true });
-        }
-    );
-});
-
-app.delete('/api/issues/:id', ensureAuthenticated, (req, res) => {
-    db.run('DELETE FROM issues WHERE id = ?', [req.params.id], function(err) {
-        if (err) {
-            console.error('Issue deletion error:', err);
-            return res.json({ success: false, message: 'Failed to delete issue' });
-        }
-        if (this.changes === 0) {
-            return res.json({ success: false, message: 'Issue not found' });
-        }
-        wss.clients.forEach(client => {
-            if (client.readyState === WebSocket.OPEN) {
-                client.send(JSON.stringify({ type: 'updated_issue', id: req.params.id }));
+        closeEditModal.addEventListener('click', () => {
+            editTaskModal.style.display = 'none';
+        });
+        window.addEventListener('click', (e) => {
+            if (e.target === editTaskModal) {
+                editTaskModal.style.display = 'none';
             }
         });
-        res.json({ success: true });
-    });
-});
+
+        function loadAdminTasks() {
+            fetch('/api/tasks')
+                .then(res => res.json())
+                .then(tasks => {
+                    const today = new Date().toISOString().split('T')[0];
+                    const dueTodayContainer = document.querySelector('#due-today .tasks');
+                    const completedContainer = document.querySelector('#completed .tasks');
+                    const scheduledContainer = document.querySelector('#scheduled .tasks');
+
+                    dueTodayContainer.innerHTML = '';
+                    completedContainer.innerHTML = '';
+                    scheduledContainer.innerHTML = '';
+
+                    const dueTodayTasks = tasks.filter(task => !task.archived && !task.completed && task.due_date === today);
+                    const completedTasks = tasks.filter(task => !task.archived && task.completed);
+                    const scheduledTasks = tasks.filter(task => !task.archived && task.recurrence);
+
+                    dueTodayTasks.forEach(task => {
+                        const card = createAdminTaskCard(task, true);
+                        dueTodayContainer.appendChild(card);
+                    });
+
+                    completedTasks.forEach(task => {
+                        const card = createAdminTaskCard(task, false);
+                        completedContainer.appendChild(card);
+                    });
+
+                    scheduledTasks.forEach(task => {
+                        const card = createAdminTaskCard(task, false, true);
+                        scheduledContainer.appendChild(card);
+                    });
+
+                    addAdminTaskEventListeners();
+                })
+                .catch(err => console.error('Admin tasks fetch error:', err));
+        }
+
+        function createAdminTaskCard(task, showCompleteButton = false, showEditButton = false) {
+            const isUrgent = task.urgency === 'urgent';
+            const card = document.createElement('div');
+            card.className = `admin-task-card ${task.completed ? 'completed' : ''} ${isUrgent ? 'urgent' : ''}`;
+            card.dataset.id = task.id;
+            card.innerHTML = `
+                <div class="task-info">
+                    <h3>${task.title}</h3>
+                    <p>Type: ${task.type}</p>
+                    <p>Due: ${task.due_date || 'None'}</p>
+                    <p>Urgency: ${task.urgency}</p>
+                    <p>Allocated To: ${task.allocated_to || 'None'}</p>
+                    <p>Season: ${task.season || 'All'}</p>
+                    ${task.recurrence ? `<p>Recurrence: ${task.recurrence}</p>` : ''}
+                    ${task.completion_note ? `<p>Completion Note: ${task.completion_note}</p>` : ''}
+                    ${task.completion_image ? `<img src="${task.completion_image}" alt="Completion Image" class="completion-image" data-src="${task.completion_image}">` : ''}
+                </div>
+                <div class="task-actions">
+                    ${task.completed ? `<p class="completed-note">Task Completed</p>` : ''}
+                    ${showCompleteButton && !task.completed ? `<button class="complete-btn">Complete</button>` : ''}
+                    ${showEditButton ? `<button class="edit-btn">Edit</button>` : ''}
+                    <button class="archive-btn">Archive</button>
+                    <button class="delete-btn">Delete</button>
+                </div>
+            `;
+            return card;
+        }
+
+        function addAdminTaskEventListeners() {
+            document.querySelectorAll('.complete-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const card = btn.closest('.admin-task-card');
+                    fetch(`/api/tasks/${card.dataset.id}/complete`, { method: 'POST' })
+                        .then(res => res.json())
+                        .then(data => {
+                            if (data.success) {
+                                showToast('Task completed successfully!');
+                                loadAdminTasks();
+                            }
+                        })
+                        .catch(err => console.error('Complete task error:', err));
+                });
+            });
+
+            document.querySelectorAll('.edit-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const card = btn.closest('.admin-task-card');
+                    fetch('/api/tasks')
+                        .then(res => res.json())
+                        .then(tasks => {
+                            const task = tasks.find(t => t.id == card.dataset.id);
+                            editTaskForm.querySelector('input[name="id"]').value = task.id;
+                            editTaskForm.querySelector('input[name="title"]').value = task.title;
+                            editTaskForm.querySelector('select[name="type"]').value = task.type;
+                            editTaskForm.querySelector('textarea[name="description"]').value = task.description || '';
+                            editTaskForm.querySelector('input[name="due_date"]').value = task.due_date || '';
+                            editTaskForm.querySelector('select[name="urgency"]').value = task.urgency;
+                            editTaskForm.querySelector('select[name="allocated_to"]').value = task.allocated_to || '';
+                            editTaskForm.dataset.existingImage = task.image || '';
+                            editSeasonButtons.forEach(b => b.classList.remove('active'));
+                            const seasonBtn = Array.from(editSeasonButtons).find(b => b.dataset.season === (task.season || 'all'));
+                            if (seasonBtn) {
+                                seasonBtn.classList.add('active');
+                                editSeasonInput.value = task.season || 'all';
+                            }
+                            editTaskForm.querySelector('select[name="recurrence"]').value = task.recurrence || '';
+                            editTaskModal.style.display = 'flex';
+                        })
+                        .catch(err => console.error('Fetch task error:', err));
+                });
+            });
+
+            document.querySelectorAll('.archive-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const card = btn.closest('.admin-task-card');
+                    fetch(`/api/tasks/${card.dataset.id}/archive`, { method: 'POST' })
+                        .then(res => res.json())
+                        .then(data => {
+                            if (data.success) {
+                                showToast('Task archived successfully!');
+                                loadAdminTasks();
+                                if (archiveTasksContainer && window.location.pathname === '/archive') {
+                                    loadArchiveTasks();
+                                }
+                            }
+                        })
+                        .catch(err => console.error('Archive task error:', err));
+                });
+            });
+
+            document.querySelectorAll('.delete-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const card = btn.closest('.admin-task-card');
+                    fetch(`/api/tasks/${card.dataset.id}`, { method: 'DELETE'
