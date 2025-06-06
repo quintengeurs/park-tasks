@@ -1,43 +1,69 @@
 const express = require('express');
-const http = require('http');
 const sqlite3 = require('sqlite3').verbose();
-const bcrypt = require('bcrypt');
 const session = require('express-session');
+const bcrypt = require('bcrypt');
+const WebSocket = require('ws');
 const multer = require('multer');
 const path = require('path');
-const WebSocket = require('ws');
-const Sequelize = require('sequelize');
-const SequelizeStore = require('connect-session-sequelize')(session.Store);
-const app = express();
-const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+const fs = require('fs');
 
-// Sequelize setup
-const sequelize = new Sequelize({
-    dialect: 'sqlite',
-    storage: 'database.db'
+const app = express();
+const port = process.env.PORT || 3000;
+
+// Database setup
+const db = new sqlite3.Database('./database.db', (err) => {
+    if (err) console.error('Database connection error:', err);
+    else console.log('Connected to SQLite database');
 });
 
-// Session middleware with Sequelize store
-app.use(session({
-    secret: 'your-secret-key',
-    resave: false,
-    saveUninitialized: false,
-    store: new SequelizeStore({
-        db: sequelize,
-        tableName: 'sessions', // Optional: custom table name
-        checkExpirationInterval: 15 * 60 * 1000, // Clean up expired sessions every 15 minutes
-        expiration: 24 * 60 * 60 * 1000 // Sessions expire after 24 hours
-    })
-}));
+db.serialize(() => {
+    db.run(`
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            role TEXT NOT NULL,
+            permissions TEXT DEFAULT '["tasks"]'
+        )
+    `);
+    db.run(`
+        CREATE TABLE IF NOT EXISTS tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            type TEXT NOT NULL,
+            description TEXT,
+            due_date TEXT,
+            urgency TEXT NOT NULL,
+            allocated_to TEXT,
+            season TEXT DEFAULT 'all',
+            image TEXT,
+            completed BOOLEAN DEFAULT FALSE,
+            archived BOOLEAN DEFAULT FALSE,
+            recurrence TEXT,
+            original_task_id INTEGER,
+            completion_image TEXT,
+            completion_note TEXT
+        )
+    `);
+    db.run(`
+        CREATE TABLE IF NOT EXISTS issues (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            location TEXT NOT NULL,
+            urgency TEXT NOT NULL,
+            image TEXT,
+            description TEXT,
+            raised_by TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    `);
+});
 
-// Sync Sequelize to create the sessions table
-sequelize.sync();
-
-// Multer for file uploads
+// Multer setup for file uploads
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
-        cb(null, 'public/uploads/');
+        const dir = 'public/uploads/';
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        cb(null, dir);
     },
     filename: (req, file, cb) => {
         cb(null, Date.now() + path.extname(file.originalname));
@@ -45,313 +71,367 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-// Database
-const db = new sqlite3.Database('database.db');
-
-// Set view engine
-app.set('view engine', 'ejs');
-
-// WebSocket setup
-wss.on('connection', (ws) => {
-    console.log('WebSocket client connected');
-    ws.on('close', () => console.log('WebSocket client disconnected'));
+// Middleware
+app.use(express.static('public'));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(session({
+    secret: process.env.SESSION_SECRET || 'your-secret-key',
+    resave: false,
+    saveUninitialized: false,
+    cookie: { secure: process.env.NODE_ENV === 'production' }
+}));
+app.use((req, res, next) => {
+    res.header('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.header('Pragma', 'no-cache');
+    res.header('Expires', '0');
+    next();
 });
 
-// Broadcast function
-function broadcast(message) {
-    wss.clients.forEach(client => {
-        if (client.readyState === WebSocket.OPEN) {
-            client.send(JSON.stringify(message));
-        }
-    });
+// Authentication middleware
+function ensureAuthenticated(req, res, next) {
+    if (req.session.userId) return next();
+    res.status(401).json({ success: false, message: 'Unauthorized' });
 }
 
+// WebSocket server
+const server = app.listen(port, () => console.log(`Server running on port ${port}`));
+const wss = new WebSocket.Server({ server });
+
 // Routes
-app.get('/', (req, res) => {
-    if (!req.session.user) return res.redirect('/login');
-    res.render('index', { user: req.session.user });
-});
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+app.get('/admin', ensureAuthenticated, (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
+app.get('/archive', ensureAuthenticated, (req, res) => res.sendFile(path.join(__dirname, 'public', 'archive.html')));
+app.get('/staff', ensureAuthenticated, (req, res) => res.sendFile(path.join(__dirname, 'public', 'staff.html')));
+app.get('/issues', ensureAuthenticated, (req, res) => res.sendFile(path.join(__dirname, 'public', 'issues.html')));
+app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'public', 'login.html')));
 
-app.get('/setup', (req, res) => {
-    db.serialize(() => {
-        db.run(`CREATE TABLE IF NOT EXISTS tasks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            description TEXT,
-            type TEXT NOT NULL,
-            urgency TEXT,
-            image TEXT,
-            due_date TEXT,
-            season TEXT,
-            allocated_to TEXT,
-            recurrence TEXT,
-            status TEXT CHECK(status IN ('active', 'completed')),
-            archived BOOLEAN NOT NULL DEFAULT 0,
-            completed BOOLEAN NOT NULL DEFAULT 0,
-            completed_date TEXT,
-            completion_note TEXT,
-            completion_image TEXT,
-            original_task_id INTEGER
-        )`);
-        db.run(`CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT NOT NULL UNIQUE,
-            password TEXT NOT NULL,
-            role TEXT NOT NULL,
-            rospa_trained INTEGER DEFAULT 0
-        )`);
-        db.run(`CREATE TABLE IF NOT EXISTS issues (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            description TEXT NOT NULL,
-            location TEXT NOT NULL,
-            image_path TEXT,
-            urgency TEXT CHECK(urgency IN ('Low', 'Medium', 'High')),
-            created_at TEXT
-        )`);
-        db.run(`CREATE TABLE IF NOT EXISTS inspections (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            location TEXT NOT NULL,
-            type TEXT NOT NULL,
-            subtype TEXT,
-            notes TEXT,
-            user_id INTEGER,
-            created_at TEXT,
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        )`);
-        const hashedPassword = bcrypt.hashSync('admin123', 10);
-        db.run(`INSERT OR IGNORE INTO users (username, password, role) 
-                VALUES ('admin', ?, 'Admin')`, [hashedPassword]);
-        db.run(`INSERT OR IGNORE INTO tasks (title, type, urgency, season, status) 
-                VALUES ('Test Task', 'maintenance', 'normal', 'all', 'active')`);
-    });
-    res.send('Database initialized');
-});
-
-app.get('/login', (req, res) => {
-    res.render('login', { error: null });
-});
-
+// Login
 app.post('/api/login', (req, res) => {
     const { username, password } = req.body;
-    db.get('SELECT * FROM users WHERE username = ?', [username], (err, user) => {
-        if (err || !user || !bcrypt.compareSync(password, user.password)) {
+    db.get('SELECT * FROM users WHERE username = ?', [username], async (err, user) => {
+        if (err) {
+            console.error('Login error:', err);
+            return res.json({ success: false, message: 'Server error' });
+        }
+        if (!user || !(await bcrypt.compare(password, user.password))) {
             return res.json({ success: false, message: 'Invalid credentials' });
         }
-        req.session.user = user;
+        req.session.userId = user.id;
         res.json({ success: true });
     });
 });
 
+// Logout
 app.post('/api/logout', (req, res) => {
-    req.session.destroy();
-    res.json({ success: true });
+    req.session.destroy(err => {
+        if (err) {
+            console.error('Logout error:', err);
+            return res.json({ success: false, message: 'Logout failed' });
+        }
+        res.json({ success: true });
+    });
 });
 
+// Current user
 app.get('/api/current-user', (req, res) => {
-    if (req.session.user) {
-        res.json(req.session.user);
-    } else {
-        res.json(null);
+    if (!req.session.userId) return res.json(null);
+    db.get('SELECT id, username, role, permissions FROM users WHERE id = ?', [req.session.userId], (err, user) => {
+        if (err) {
+            console.error('Current user error:', err);
+            return res.json(null);
+        }
+        if (!user) return res.json(null);
+        user.permissions = JSON.parse(user.permissions || '["tasks"]');
+        res.json(user);
+    });
+});
+
+// Users
+app.get('/api/users', ensureAuthenticated, (req, res) => {
+    db.all('SELECT id, username, role, permissions FROM users', [], (err, users) => {
+        if (err) {
+            console.error('Users fetch error:', err);
+            return res.json({ success: false, message: 'Server error' });
+        }
+        users.forEach(user => {
+            user.permissions = JSON.parse(user.permissions || '["tasks"]');
+        });
+        res.json(users);
+    });
+});
+
+app.post('/api/users', ensureAuthenticated, async (req, res) => {
+    const { username, password, role, permissions } = req.body;
+    if (!username || !password || !role || !permissions) {
+        return res.json({ success: false, message: 'Missing required fields' });
+    }
+    try {
+        const hashedPassword = await bcrypt.hash(password, 10);
+        db.run(
+            'INSERT INTO users (username, password, role, permissions) VALUES (?, ?, ?, ?)',
+            [username, hashedPassword, role, JSON.stringify(permissions)],
+            function(err) {
+                if (err) {
+                    console.error('User creation error:', err);
+                    return res.json({ success: false, message: 'Failed to create user' });
+                }
+                res.json({ success: true });
+            }
+        );
+    } catch (err) {
+        console.error('User creation error:', err);
+        res.json({ success: false, message: 'Server error' });
     }
 });
 
-app.get('/admin', (req, res) => {
-    if (!req.session.user || req.session.user.role !== 'Admin') return res.redirect('/');
-    res.render('admin', { user: req.session.user });
+app.put('/api/users/:id', ensureAuthenticated, async (req, res) => {
+    const { username, password, role, permissions } = req.body;
+    let query = 'UPDATE users SET username = ?, role = ?, permissions = ?';
+    const params = [username, role, JSON.stringify(permissions)];
+    if (password) {
+        query += ', password = ?';
+        params.push(await bcrypt.hash(password, 10));
+    }
+    query += ' WHERE id = ?';
+    params.push(req.params.id);
+    db.run(query, params, function(err) {
+        if (err) {
+            console.error('User update error:', err);
+            return res.json({ success: false, message: 'Failed to update user' });
+        }
+        if (this.changes === 0) {
+            return res.json({ success: false, message: 'User not found' });
+        }
+        res.json({ success: true });
+    });
 });
 
-app.get('/api/tasks', (req, res) => {
+app.delete('/api/users/:id', ensureAuthenticated, (req, res) => {
+    db.run('DELETE FROM users WHERE id = ?', [req.params.id], function(err) {
+        if (err) {
+            console.error('User deletion error:', err);
+            return res.json({ success: false, message: 'Failed to delete user' });
+        }
+        if (this.changes === 0) {
+            return res.json({ success: false, message: 'User not found' });
+        }
+        res.json({ success: true });
+    });
+});
+
+// Tasks
+app.get('/api/tasks', ensureAuthenticated, (req, res) => {
     db.all('SELECT * FROM tasks', [], (err, tasks) => {
-        if (err) return res.status(500).json({ success: false, message: 'Database error' });
+        if (err) {
+            console.error('Tasks fetch error:', err);
+            return res.json({ success: false, message: 'Server error' });
+        }
         res.json(tasks);
     });
 });
 
-app.post('/api/tasks', upload.single('image'), (req, res) => {
-    const { title, description, type, custom_type, urgency, due_date, season, allocated_to, recurrence } = req.body;
-    const taskType = custom_type || type;
-    const imagePath = req.file ? `/uploads/${req.file.filename}` : null;
+app.post('/api/tasks', ensureAuthenticated, upload.single('image'), (req, res) => {
+    const { title, type, description, due_date, urgency, allocated_to, season, recurrence } = req.body;
+    const image = req.file ? `/uploads/${req.file.filename}` : null;
+    const today = new Date().toISOString().split('T')[0];
+    if (!title || !type || !urgency) {
+        console.error('Missing required fields');
+        return res.json({ success: false, message: 'Title, type, and urgency are required' });
+    }
+    if (!due_date && (!season || season === 'all') && due_date !== today) {
+        console.error('Validation failed: due date or specific season required');
+        return res.json({ success: false, message: 'Either a due date or a specific season is required' });
+    }
     db.run(
-        `INSERT INTO tasks (title, description, type, urgency, image, due_date, season, allocated_to, recurrence, status, archived, completed) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [title, description, taskType, urgency, imagePath, due_date || null, season || 'all', allocated_to || null, recurrence || null, 'active', false, false],
+        `INSERT INTO tasks (title, type, description, due_date, urgency, allocated_to, season, image, completed, archived, recurrence) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [title, type, description || null, due_date || null, urgency, allocated_to || null, season || 'all', image, false, false, recurrence || null],
         function(err) {
-            if (err) return res.status(500).json({ success: false, message: 'Database error' });
-            broadcast({ type: 'new_task' });
-            res.json({ success: true, id: this.lastID });
-        }
-    );
-});
-
-app.put('/api/tasks/:id', upload.single('image'), (req, res) => {
-    const taskId = req.params.id;
-    const { title, description, type, custom_type, urgency, due_date, season, allocated_to, recurrence, existing_image } = req.body;
-    const taskType = custom_type || type;
-    const imagePath = req.file ? `/uploads/${req.file.filename}` : existing_image;
-    db.run(
-        `UPDATE tasks SET title = ?, description = ?, type = ?, urgency = ?, image = ?, due_date = ?, season = ?, allocated_to = ?, recurrence = ? WHERE id = ?`,
-        [title, description, taskType, urgency, imagePath, due_date || null, season || 'all', allocated_to || null, recurrence || null, taskId],
-        (err) => {
-            if (err) return res.status(500).json({ success: false, message: 'Database error' });
-            broadcast({ type: 'updated_task' });
+            if (err) {
+                console.error('Task insertion error:', err);
+                return res.json({ success: false, message: 'Failed to add task' });
+            }
+            wss.clients.forEach(client => {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.send(JSON.stringify({ type: 'new_task', id: this.lastID }));
+                }
+            });
             res.json({ success: true });
         }
     );
 });
 
-app.post('/api/tasks/:id/complete', (req, res) => {
-    const taskId = req.params.id;
-    db.run('UPDATE tasks SET completed = 1, completed_date = datetime("now") WHERE id = ?', [taskId], (err) => {
-        if (err) return res.status(500).json({ success: false, message: 'Database error' });
-        broadcast({ type: 'updated_task' });
-        res.json({ success: true });
-    });
-});
-
-app.post('/api/tasks/:id/archive', (req, res) => {
-    const taskId = req.params.id;
-    db.run('UPDATE tasks SET archived = true WHERE id = ?', [taskId], (err) => {
-        if (err) return res.status(500).json({ success: false, message: 'Database error' });
-        broadcast({ type: 'updated_task' });
-        res.json({ success: true });
-    });
-});
-
-app.delete('/api/tasks/:id', (req, res) => {
-    const taskId = req.params.id;
-    db.run('DELETE FROM tasks WHERE id = ?', [taskId], (err) => {
-        if (err) return res.status(500).json({ success: false, message: 'Database error' });
-        broadcast({ type: 'updated_task' });
-        res.json({ success: true });
-    });
-});
-
-app.get('/staff', (req, res) => {
-    if (!req.session.user) return res.redirect('/');
-    res.render('staff', { user: req.session.user });
-});
-
-app.get('/api/users', (req, res) => {
-    db.all('SELECT id, username, role FROM users', [], (err, users) => {
-        if (err) return res.status(500).json({ success: false, message: 'Database error' });
-        res.json(users);
-    });
-});
-
-app.post('/api/users', (req, res) => {
-    const { username, password, role } = req.body;
-    db.get('SELECT username FROM users WHERE username = ?', [username], (err, existingUser) => {
-        if (err) return res.status(500).json({ success: false, message: 'Database error' });
-        if (existingUser) return res.json({ success: false, message: 'Username already exists' });
-        const hashedPassword = bcrypt.hashSync(password, 10);
-        db.run(
-            'INSERT INTO users (username, password, role) VALUES (?, ?, ?)',
-            [username, hashedPassword, role],
-            function(err) {
-                if (err) return res.status(500).json({ success: false, message: 'Database error' });
-                res.json({ success: true, id: this.lastID });
+app.put('/api/tasks/:id', ensureAuthenticated, upload.single('image'), (req, res) => {
+    const { title, type, description, due_date, urgency, allocated_to, season, recurrence, existing_image } = req.body;
+    const image = req.file ? `/uploads/${req.file.filename}` : existing_image;
+    db.run(
+        `UPDATE tasks SET title = ?, type = ?, description = ?, due_date = ?, urgency = ?, allocated_to = ?, season = ?, image = ?, recurrence = ? WHERE id = ?`,
+        [title, type, description || null, due_date || null, urgency, allocated_to || null, season || 'all', image, recurrence || null, req.params.id],
+        function(err) {
+            if (err) {
+                console.error('Task update error:', err);
+                return res.json({ success: false, message: 'Failed to update task' });
             }
-        );
-    });
+            if (this.changes === 0) {
+                return res.json({ success: false, message: 'Task not found' });
+            }
+            wss.clients.forEach(client => {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.send(JSON.stringify({ type: 'updated_task', id: req.params.id }));
+                }
+            });
+            res.json({ success: true });
+        }
+    );
 });
 
-app.put('/api/users/:id', (req, res) => {
-    const userId = req.params.id;
-    const { username, password, role } = req.body;
-    const hashedPassword = password ? bcrypt.hashSync(password, 10) : null;
-    if (hashedPassword) {
-        db.run(
-            'UPDATE users SET username = ?, password = ?, role = ? WHERE id = ?',
-            [username, hashedPassword, role, userId],
-            (err) => {
-                if (err) return res.status(500).json({ success: false, message: 'Database error' });
-                res.json({ success: true });
-            }
-        );
-    } else {
-        db.run(
-            'UPDATE users SET username = ?, role = ? WHERE id = ?',
-            [username, role, userId],
-            (err) => {
-                if (err) return res.status(500).json({ success: false, message: 'Database error' });
-                res.json({ success: true });
-            }
-        );
+app.post('/api/tasks/:id/complete', ensureAuthenticated, upload.single('completion_image'), (req, res) => {
+    const { completion_note } = req.body;
+    const completion_image = req.file ? `/uploads/${req.file.filename}` : null;
+    if (!completion_image && !completion_note) {
+        return res.json({ success: false, message: 'Image or note required for completion' });
     }
+    db.run(
+        `UPDATE tasks SET completed = ?, completion_image = ?, completion_note = ? WHERE id = ?`,
+        [true, completion_image, completion_note || null, req.params.id],
+        function(err) {
+            if (err) {
+                console.error('Task completion error:', err);
+                return res.json({ success: false, message: 'Failed to complete task' });
+            }
+            if (this.changes === 0) {
+                return res.json({ success: false, message: 'Task not found' });
+            }
+            wss.clients.forEach(client => {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.send(JSON.stringify({ type: 'updated_task', id: req.params.id }));
+                }
+            });
+            res.json({ success: true });
+        }
+    );
 });
 
-app.delete('/api/users/:id', (req, res) => {
-    const userId = req.params.id;
-    db.run('DELETE FROM users WHERE id = ?', [userId], (err) => {
-        if (err) return res.status(500).json({ success: false, message: 'Database error' });
+app.post('/api/tasks/:id/archive', ensureAuthenticated, (req, res) => {
+    db.run(
+        `UPDATE tasks SET archived = ? WHERE id = ?`,
+        [true, req.params.id],
+        function(err) {
+            if (err) {
+                console.error('Task archive error:', err);
+                return res.json({ success: false, message: 'Failed to archive task' });
+            }
+            if (this.changes === 0) {
+                return res.json({ success: false, message: 'Task not found' });
+            }
+            wss.clients.forEach(client => {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.send(JSON.stringify({ type: 'updated_task', id: req.params.id }));
+                }
+            });
+            res.json({ success: true });
+        }
+    );
+});
+
+app.delete('/api/tasks/:id', ensureAuthenticated, (req, res) => {
+    db.run('DELETE FROM tasks WHERE id = ?', [req.params.id], function(err) {
+        if (err) {
+            console.error('Task deletion error:', err);
+            return res.json({ success: false, message: 'Failed to delete task' });
+        }
+        if (this.changes === 0) {
+            return res.json({ success: false, message: 'Task not found' });
+        }
+        wss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+                client.send(JSON.stringify({ type: 'updated_task', id: req.params.id }));
+            }
+        });
         res.json({ success: true });
     });
 });
 
-app.get('/archive', (req, res) => {
-    if (!req.session.user) return res.redirect('/');
-    res.render('archive', { user: req.session.user });
+app.post('/api/tasks/from-issue', ensureAuthenticated, upload.single('image'), (req, res) => {
+    const { title, type, description, due_date, urgency, allocated_to, season, recurrence, issue_id } = req.body;
+    const image = req.file ? `/uploads/${req.file.filename}` : null;
+    if (!title || !type || !urgency) {
+        return res.json({ success: false, message: 'Title, type, and urgency are required' });
+    }
+    db.run(
+        `INSERT INTO tasks (title, type, description, due_date, urgency, allocated_to, season, image, completed, archived, recurrence) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [title, type, description || null, due_date || null, urgency, allocated_to || null, season || 'all', image, false, false, recurrence || null],
+        function(err) {
+            if (err) {
+                console.error('Task from issue error:', err);
+                return res.json({ success: false, message: 'Failed to create task' });
+            }
+            db.run('DELETE FROM issues WHERE id = ?', [issue_id], (err) => {
+                if (err) console.error('Issue deletion error:', err);
+            });
+            wss.clients.forEach(client => {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.send(JSON.stringify({ type: 'new_task', id: this.lastID }));
+                }
+            });
+            res.json({ success: true });
+        }
+    );
 });
 
-app.get('/issues', (req, res) => {
-    if (!req.session.user) return res.redirect('/');
+// Issues
+app.get('/api/issues', ensureAuthenticated, (req, res) => {
     db.all('SELECT * FROM issues ORDER BY created_at DESC', [], (err, issues) => {
-        if (err) return res.status(500).send('Database error');
-        res.render('issues', { user: req.session.user, issues });
-    });
-});
-
-app.get('/api/issues', (req, res) => {
-    db.all('SELECT * FROM issues ORDER BY created_at DESC', [], (err, issues) => {
-        if (err) return res.status(500).json({ success: false, message: 'Database error' });
+        if (err) {
+            console.error('Issues fetch error:', err);
+            return res.json({ success: false, message: 'Server error' });
+        }
         res.json(issues);
     });
 });
 
-app.post('/issues', upload.single('image'), (req, res) => {
-    const { title, description, location, urgency } = req.body;
-    const imagePath = req.file ? `/uploads/${req.file.filename}` : null;
+app.post('/api/issues', ensureAuthenticated, upload.single('image'), (req, res) => {
+    const { location, urgency, description, raised_by } = req.body;
+    const image = req.file ? `/uploads/${req.file.filename}` : null;
+    const created_at = new Date().toISOString();
+    if (!location || !urgency || !raised_by) {
+        return res.json({ success: false, message: 'Location, urgency, and raised_by are required' });
+    }
     db.run(
-        'INSERT INTO issues (title, description, location, image_path, urgency, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-        [title, description, location, imagePath, urgency, new Date().toISOString()],
-        (err) => {
-            if (err) return res.status(500).json({ success: false, message: 'Database error' });
-            broadcast({ type: 'new_issue' });
-            res.redirect('/issues');
+        `INSERT INTO issues (location, urgency, image, description, raised_by, created_at) 
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [location, urgency, image, description || null, raised_by, created_at],
+        function(err) {
+            if (err) {
+                console.error('Issue creation error:', err);
+                return res.json({ success: false, message: 'Failed to add issue' });
+            }
+            wss.clients.forEach(client => {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.send(JSON.stringify({ type: 'new_issue', id: this.lastID }));
+                }
+            });
+            res.json({ success: true });
         }
     );
 });
 
-app.get('/inspections', (req, res) => {
-    if (!req.session.user) return res.redirect('/');
-    db.all('SELECT * FROM inspections ORDER BY created_at DESC', [], (err, inspections) => {
-        if (err) return res.status(500).send('Database error');
-        res.render('inspections', { user: req.session.user, inspections });
-    });
-});
-
-app.get('/api/inspections', (req, res) => {
-    db.all('SELECT * FROM inspections ORDER BY created_at DESC', [], (err, inspections) => {
-        if (err) return res.status(500).json({ success: false, message: 'Database error' });
-        res.json(inspections);
-    });
-});
-
-app.post('/inspections', (req, res) => {
-    const { location, type, subtype, notes } = req.body;
-    const userId = req.session.user.id;
-    db.run(
-        'INSERT INTO inspections (location, type, subtype, notes, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-        [location, type, subtype || null, notes || null, userId, new Date().toISOString()],
-        (err) => {
-            if (err) return res.status(500).json({ success: false, message: 'Database error' });
-            broadcast({ type: 'new_inspection' });
-            res.redirect('/inspections');
+app.delete('/api/issues/:id', ensureAuthenticated, (req, res) => {
+    db.run('DELETE FROM issues WHERE id = ?', [req.params.id], function(err) {
+        if (err) {
+            console.error('Issue deletion error:', err);
+            return res.json({ success: false, message: 'Failed to delete issue' });
         }
-    );
-});
-
-server.listen(3000, () => {
-    console.log('Server running on port 3000');
+        if (this.changes === 0) {
+            return res.json({ success: false, message: 'Issue not found' });
+        }
+        wss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+                client.send(JSON.stringify({ type: 'updated_issue', id: req.params.id }));
+            }
+        });
+        res.json({ success: true });
+    });
 });
