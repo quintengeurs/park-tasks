@@ -302,11 +302,11 @@ app.post('/api/tasks/:id/complete', requireAuth, upload.single('completion_image
             return res.status(404).json({ success: false, message: 'Task not found' });
         }
         if (req.user.role !== 'admin' && task.allocated_to !== req.user.username) {
-            return res.status(403).json({ success: 'Unauthorized' });
+            return res.status(403).json({ success: false, message: 'Unauthorized' });
         }
         await task.update({
             completed: true,
-            completion_note: req.body.completion || null,
+            completion_note: req.body.completion_note || null,
             completion_image: req.file ? `/uploads/${req.file.filename}` : null
         });
         broadcast({ type: 'updated_task', task });
@@ -353,12 +353,12 @@ app.post('/api/tasks/:id/unarchive', requireAuth, async (req, res) => {
     }
 });
 
-app.delete('/api/tasks/:id', requireAuthrequire, async (req, res) => {
+app.delete('/api/tasks/:id', requireAuth, async (req, res) => {
     if (!req.user.permissions.includes('admin')) {
         return res.status(403).json({ success: false, message: 'Unauthorized' });
     }
     try {
-        const task = await Task.findByPk(req.params.id');
+        const task = await Task.findByPk(req.params.id);
         if (!task) {
             return res.status(404).json({ success: false, message: 'Task not found' });
         }
@@ -375,7 +375,7 @@ app.get('/api/issues', requireAuth, async (req, res) => {
     res.json(issues);
 });
 
-app.post('/api/issues', requireAuthrequire, upload.single('image'), async (req, res) => {
+app.post('/api/issues', requireAuth, upload.single('image'), async (req, res) => {
     try {
         const issueData = {
             location: req.body.location,
@@ -395,18 +395,18 @@ app.post('/api/issues', requireAuthrequire, upload.single('image'), async (req, 
 
 app.delete('/api/issues/:id', requireAuth, async (req, res) => {
     if (!req.user.permissions.includes('issues')) {
-        return res.status(403).json({ success: false, error: 'Unauthorized' });
+        return res.status(403).json({ success: false, message: 'Unauthorized' });
     }
     try {
-        const issue = await Issue.findByPk(req.params.id');
+        const issue = await Issue.findByPk(req.params.id);
         if (!issue) {
-            return res.status(404).json({ success: false, error: 'Issue not found' });
+            return res.status(404).json({ success: false, message: 'Issue not found' });
         }
         await issue.destroy();
         res.json({ success: true });
     } catch (err) {
         console.error('Issue deletion error:', err);
-        res.status(500).json({ success: false, error: 'Server error' });
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 });
 
