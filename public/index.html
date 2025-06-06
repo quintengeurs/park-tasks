@@ -3,26 +3,32 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Seasonal Tasks</title>
-    <link rel="stylesheet" href="css/styles.css">
+    <title>Park Tasks</title>
+    <style>
+        .toast { position: fixed; bottom: 10px; right: 10px; background: #333; color: #fff; padding: 10px; }
+        .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: none; justify-content: center; align-items: center; }
+        .modal-content { background: white; padding: 20px; width: 80%; max-width: 500px; }
+        .close-btn { float: right; font-size: 20px; cursor: pointer; }
+        .task-card, .admin-task-card, .issue-card { border: 1px solid #ddd; padding: 10px; margin: 5px; }
+        .urgent { border-color: red; }
+        .completed { background: #f0f0f0; }
+        .overdue { background: #ffebee; }
+        .task-details.collapsed { display: none; }
+        .image-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; justify-content: center; align-items: center; }
+        .image-modal img { max-width: 90%; max-height: 90%; }
+        .filter-btn.active { background: #4CAF50; color: white; }
+    </style>
 </head>
 <body>
-    <nav id="navbar" class="navbar"></nav>
-    <div class="container">
-        <h1>Tasks</h1>
-        <div class="filter-buttons">
-            <button class="filter-btn active" data-type="all">All</button>
-            <button class="filter-btn" data-type="maintenance">Maintenance</button>
-            <button class="filter-btn" data-type="planting">Planting</button>
-            <button class="filter-btn" data-type="harvesting">Harvesting</button>
-            <button class="filter-btn" data-type="allocated">Allocated to Me</button>
-            <button id="raise-issue-btn">Raise Issue</button>
-        </div>
-        <div id="tasks" class="task-list">
-            <div class="tasks"></div>
-        </div>
+    <nav id="navbar"></nav>
+    <div id="tasks">
+        <button class="filter-btn" data-type="all">All</button>
+        <button class="filter-btn" data-type="maintenance">Maintenance</button>
+        <button class="filter-btn" data-type="allocated">Allocated</button>
+        <div class="tasks"></div>
     </div>
-    <div id="issue-modal" class="modal" style="display: none;">
+    <button id="raise-issue-btn">Raise Issue</button>
+    <div id="issue-modal" class="modal">
         <div class="modal-content">
             <span id="close-issue-modal" class="close">×</span>
             <h2>Raise Issue</h2>
@@ -46,19 +52,19 @@
             <p id="issue-form-error" style="color: red; display: none;"></p>
         </div>
     </div>
-    <div id="complete-task-modal" class="modal" style="display: none;">
+    <div id="complete-task-modal" class="modal">
         <div class="modal-content">
             <span id="close-complete-modal" class="close">×</span>
             <h2>Complete Task</h2>
             <form id="complete-task-form">
+                <input type="hidden" name="task_id">
+                <label for="completion-note">Completion Note</label>
+                <textarea id="completion-note" name="completion_note"></textarea>
                 <label for="completion-image">Completion Image</label>
                 <input type="file" id="completion-image" name="completion_image" accept="image/*">
-                <label for="completion-note">Completion Note</label>
-                <textarea id="completion-note" name="completion_note" placeholder="Enter note or reason if task cannot be completed"></textarea>
-                <input type="hidden" name="task_id">
-                <button type="submit">Submit Completion</button>
+                <button type="submit">Submit</button>
             </form>
-            <p id="complete-form-error" style="color: red; display: none;">Image or note required</p>
+            <p id="complete-form-error" style="color: red; display: none;"></p>
         </div>
     </div>
     <script src="js/scripts.js"></script>
