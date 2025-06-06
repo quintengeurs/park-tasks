@@ -1,4 +1,10 @@
 document.addEventListener('DOMContentLoaded', () => {
+    // Utility function to ensure session cookies are sent
+    function fetchWithCredentials(url, options = {}) {
+        options.credentials = 'include'; // Include cookies for session
+        return fetch(url, options);
+    }
+
     const navbar = document.getElementById('navbar');
     const tasksContainer = document.getElementById('tasks');
     const adminTasksContainer = document.getElementById('admin-tasks');
@@ -44,15 +50,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const password = loginForm.querySelector('#password').value;
             const errorElement = document.getElementById('login-error');
             try {
-                const res = await fetch('/api/login', {
+                const res = await fetchWithCredentials('/api/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, password }),
-                    credentials: 'include'
+                    body: JSON.stringify({ username, password })
                 });
                 const data = await res.json();
                 console.log('Login response:', data);
                 if (data.success) {
+                    console.log('Login successful, redirecting to /');
                     window.location.href = '/';
                 } else {
                     errorElement.style.display = 'block';
@@ -66,11 +72,12 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Navbar setup
+    // Navbar and user check
     if (navbar) {
-        fetch('/api/current-user', { credentials: 'include' })
-            .then(res => res.json())
-            .then(user => {
+        async function checkUserAndUpdateNavbar() {
+            try {
+                const res = await fetchWithCredentials('/api/current-user');
+                const user = await res.json();
                 console.log('Current user response:', user);
                 if (user) {
                     const permissions = user.permissions || ['tasks'];
@@ -86,13 +93,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (logoutBtn) {
                         logoutBtn.addEventListener('click', async () => {
                             try {
-                                const res = await fetch('/api/logout', {
+                                const res = await fetchWithCredentials('/api/logout', {
                                     method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    credentials: 'include'
+                                    headers: { 'Content-Type': 'application/json' }
                                 });
                                 const data = await res.json();
                                 if (data.success) {
+                                    console.log('Logout successful');
                                     window.location.href = '/login';
                                 } else {
                                     console.error('Logout failed:', data.message);
@@ -104,15 +111,18 @@ document.addEventListener('DOMContentLoaded', () => {
                             }
                         });
                     }
-                } else {
+                } else if (window.location.pathname !== '/login') {
                     console.log('Redirecting to login: no user');
                     window.location.href = '/login';
                 }
-            })
-            .catch(err => {
+            } catch (err) {
                 console.error('Navbar fetch error:', err);
-                window.location.href = '/login';
-            });
+                if (window.location.pathname !== '/login') {
+                    window.location.href = '/login';
+                }
+            }
+        }
+        checkUserAndUpdateNavbar();
     }
 
     // Determine current season
@@ -152,7 +162,8 @@ document.addEventListener('DOMContentLoaded', () => {
         };
         ws.onclose = () => {
             console.log('WebSocket disconnected, reconnecting...');
-            setTimeout(connectWebSocket, 5000);
+            setTimeout(connectWebSocket, 10);
+            setTimeout(() => {}, 5000);
         };
         ws.onerror = (err) => console.error('WebSocket error:', err);
     }
@@ -166,14 +177,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const scheduledAllocatedTo = document.getElementById('allocated-to');
         const editAllocatedToSelect = document.getElementById('edit-allocated-to');
         const taskFromIssueAllocatedTo = taskFromIssueForm?.querySelector('select[name="allocated_to"]');
-        fetch('/api/users', { credentials: 'include' })
+        fetchWithCredentials('/api/users')
             .then(res => res.json())
             .then(users => {
                 const options = `<option value="">None</option>${users.map(user => `<option value="${user.username}">${user.username}</option>`).join('')}`;
                 if (dueTodayAllocatedTo) dueTodayAllocatedTo.innerHTML = options;
-                if (scheduledAllocatedTo) scheduledAllocatedTo.innerHTML = options;
-                if (editAllocatedToSelect) editAllocatedToSelect.innerHTML = options;
-                if (taskFromIssueAllocatedTo) taskFromIssueAllocatedTo.innerHTML = options;
+                if (scheduledAllocatedTo) dueTimeAllocatedTo.innerHTML = options;
+                if (editAllocatedToSelect) editTask(tasks.id).innerHTML = tasks;
+                else if (taskFromIssueAllocatedTo) {
+                    taskFromIssue(tasks).id;
+                }
             })
             .catch(err => console.error('Fetch users error:', err));
 
@@ -193,7 +206,7 @@ document.addEventListener('DOMContentLoaded', () => {
             editSeasonButtons.forEach(btn => {
                 btn.addEventListener('click', () => {
                     editSeasonButtons.forEach(b => b.classList.remove('active'));
-                    btn.classList.add('active');
+                    btn.classList.add('active'));
                     editSeasonInput.value = btn.dataset.season;
                 });
             });
@@ -205,7 +218,7 @@ document.addEventListener('DOMContentLoaded', () => {
             taskFromIssueSeasonButtons.forEach(btn => {
                 btn.addEventListener('click', () => {
                     taskFromIssueSeasonButtons.forEach(b => b.classList.remove('active'));
-                    btn.classList.add('active');
+                    btn.classList.add('active'));
                     taskFromIssueSeasonInput.value = btn.dataset.season;
                 });
             });
@@ -220,10 +233,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 formData.append('season', 'all');
                 formData.append('recurrence', '');
                 try {
-                    const res = await fetch('/api/tasks', {
+                    const res = await fetchWithCredentials('/api/tasks', {
                         method: 'POST',
-                        body: formData,
-                        credentials: 'include'
+                        body: formData
                     });
                     const data = await res.json();
                     if (data.success) {
@@ -255,10 +267,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 const formData = new FormData(scheduledTaskForm);
                 try {
-                    const res = await fetch('/api/tasks', {
+                    const res = await fetchWithCredentials('/api/tasks', {
                         method: 'POST',
-                        body: formData,
-                        credentials: 'include'
+                        body: formData
                     });
                     const data = await res.json();
                     if (data.success) {
@@ -294,10 +305,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 const formData = new FormData(editTaskForm);
                 formData.append('existing_image', editTaskForm.dataset.existingImage || '');
                 try {
-                    const res = await fetch(`/api/tasks/${taskId}`, {
+                    const res = await fetchWithCredentials(`/api/tasks/${taskId}`, {
                         method: 'PUT',
-                        body: formData,
-                        credentials: 'include'
+                        body: formData
                     });
                     const data = await res.json();
                     if (data.success) {
@@ -334,7 +344,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         function loadAdminTasks() {
-            fetch('/api/tasks', { credentials: 'include' })
+            fetchWithCredentials('/api/tasks')
                 .then(res => res.json())
                 .then(tasks => {
                     const today = new Date().toISOString().split('T')[0];
@@ -447,7 +457,7 @@ document.addEventListener('DOMContentLoaded', () => {
             document.querySelectorAll('.edit-btn').forEach(btn => {
                 btn.addEventListener('click', () => {
                     const card = btn.closest('.admin-task-card');
-                    fetch('/api/tasks', { credentials: 'include' })
+                    fetchWithCredentials('/api/tasks')
                         .then(res => res.json())
                         .then(tasks => {
                             const task = tasks.find(t => t.id == card.dataset.id);
@@ -476,9 +486,8 @@ document.addEventListener('DOMContentLoaded', () => {
             document.querySelectorAll('.archive-btn').forEach(btn => {
                 btn.addEventListener('click', () => {
                     const card = btn.closest('.admin-task-card');
-                    fetch(`/api/tasks/${card.dataset.id}/archive`, {
-                        method: 'POST',
-                        credentials: 'include'
+                    fetchWithCredentials(`/api/tasks/${card.dataset.id}/archive`, {
+                        method: 'POST'
                     })
                         .then(res => res.json())
                         .then(data => {
@@ -497,9 +506,8 @@ document.addEventListener('DOMContentLoaded', () => {
             document.querySelectorAll('.delete-btn').forEach(btn => {
                 btn.addEventListener('click', () => {
                     const card = btn.closest('.admin-task-card');
-                    fetch(`/api/tasks/${card.dataset.id}`, {
-                        method: 'DELETE',
-                        credentials: 'include'
+                    fetchWithCredentials(`/api/tasks/${card.dataset.id}`, {
+                        method: 'DELETE'
                     })
                         .then(res => res.json())
                         .then(data => {
@@ -522,7 +530,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Archive page
     if (archiveTasksContainer && window.location.pathname === '/archive') {
         function loadArchiveTasks() {
-            fetch('/api/tasks', { credentials: 'include' })
+            fetchWithCredentials('/api/tasks')
                 .then(res => res.json())
                 .then(tasks => {
                     const tasksGrid = archiveTasksContainer.querySelector('.tasks');
@@ -564,9 +572,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     document.querySelectorAll('.unarchive-btn').forEach(btn => {
                         btn.addEventListener('click', () => {
                             const card = btn.closest('.admin-task-card');
-                            fetch(`/api/tasks/${card.dataset.id}/unarchive`, {
-                                method: 'POST',
-                                credentials: 'include'
+                            fetchWithCredentials(`/api/tasks/${card.dataset.id}/unarchive`, {
+                                method: 'POST'
                             })
                                 .then(res => res.json())
                                 .then(data => {
@@ -582,9 +589,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     document.querySelectorAll('.delete-btn').forEach(btn => {
                         btn.addEventListener('click', () => {
                             const card = btn.closest('.admin-task-card');
-                            fetch(`/api/tasks/${card.dataset.id}`, {
-                                method: 'DELETE',
-                                credentials: 'include'
+                            fetchWithCredentials(`/api/tasks/${card.dataset.id}`, {
+                                method: 'DELETE'
                             })
                                 .then(res => res.json())
                                 .then(data => {
@@ -668,11 +674,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (password) body.password = password;
 
                 try {
-                    const res = await fetch(url, {
+                    const res = await fetchWithCredentials(url, {
                         method,
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(body),
-                        credentials: 'include'
+                        body: JSON.stringify(body)
                     });
                     const data = await res.json();
                     if (data.success) {
@@ -694,7 +699,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         function loadUsers() {
-            fetch('/api/users', { credentials: 'include' })
+            fetchWithCredentials('/api/users')
                 .then(res => res.json())
                 .then(users => {
                     usersList.innerHTML = '';
@@ -721,7 +726,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         btn.addEventListener('click', () => {
                             const card = btn.closest('.user-card');
                             const userId = parseInt(card.dataset.id);
-                            fetch('/api/users', { credentials: 'include' })
+                            fetchWithCredentials('/api/users')
                                 .then(res => res.json())
                                 .then(users => {
                                     const user = users.find(u => u.id === userId);
@@ -742,9 +747,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     document.querySelectorAll('.delete-btn').forEach(btn => {
                         btn.addEventListener('click', () => {
                             const card = btn.closest('.user-card');
-                            fetch(`/api/users/${card.dataset.id}`, {
-                                method: 'DELETE',
-                                credentials: 'include'
+                            fetchWithCredentials(`/api/users/${card.dataset.id}`, {
+                                method: 'DELETE'
                             })
                                 .then(res => res.json())
                                 .then(data => {
@@ -766,12 +770,13 @@ document.addEventListener('DOMContentLoaded', () => {
     // Tasks page
     if (tasksContainer && window.location.pathname === '/') {
         let currentUser = null;
-        fetch('/api/current-user', { credentials: 'include' })
-            .then(res => res.json())
-            .then(user => {
+        async function loadTasksPage() {
+            try {
+                const res = await fetchWithCredentials('/api/current-user');
+                const user = await res.json();
                 console.log('Tasks page current user:', user);
                 if (!user) {
-                    console.log('No user, redirecting to login');
+                    console.log('No user, redirecting to /login');
                     window.location.href = '/login';
                     return;
                 }
@@ -784,9 +789,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         btn.classList.add('active');
                         loadTasks(btn.dataset.type);
                     });
-                });
+                }));
 
-                const defaultType = window.innerWidth <= 600 ? 'maintenance' : 'all';
+                const defaultType = window.innerWidth <= 768 ? 'maintenance' : 'all';
                 const defaultBtn = document.querySelector(`.filter-btn[data-type="${defaultType}"]`);
                 if (defaultBtn) {
                     defaultBtn.classList.add('active');
@@ -795,8 +800,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 // Raise issue button
                 if (raiseIssueBtn) {
-                    raiseIssueBtn.addEventListener('click', () => {
+                    raiseIssueButton.addEventListener('click', async () => {
                         console.log('Raise issue button clicked');
+                        const userRes = await fetch('/api/current-user', { credentials: 'include' });
+                        const user = await userRes.json();
+                        if (!user) {
+                            console.log('No user logged in for raise issue');
+                            window.location.href = '/login';
+                            return;
+                        }
                         if (issueForm && issueModal) {
                             issueForm.querySelector('input[name="raised_by"]').value = currentUser.username;
                             issueModal.style.display = 'flex';
@@ -804,7 +816,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             console.error('Issue modal or form not found');
                             showToast('Error: Issue form not available');
                         }
-                    });
+                    }));
                 } else {
                     console.error('Raise issue button not found');
                 }
@@ -824,8 +836,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
 
                 if (issueForm) {
-                    issueForm.addEventListener('submit', async (e) => {
-                        e.preventDefault();
+                    issueForm.addEventListener('submit', async (event) => {
+                        event.preventDefault();
                         console.log('Submitting issue form');
                         const formData = new FormData(issueForm);
                         try {
@@ -852,16 +864,16 @@ document.addEventListener('DOMContentLoaded', () => {
                             document.getElementById('issue-form-error').style.display = 'block';
                             document.getElementById('issue-form-error').textContent = 'Server error';
                         }
-                    });
+                    }));
                 }
 
-                if (completeTaskForm) {
-                    completeTaskForm.addEventListener('submit', async (e) => {
-                        e.preventDefault();
+                if (completeTaskModal) {
+                    completeTaskModalForm.addEventListener('submit', async (event) => {
+                        event.preventDefault();
                         const formData = new FormData(completeTaskForm);
                         const taskId = formData.get('task_id');
-                        const completionImage = formData.get('completion_image');
-                        const completionNote = formData.get('completion_note');
+                        const completedImage = formData.get('completion_image');
+                        const completionNote = completedData.form.get('completion_note');
                         if (!completionImage && !completionNote) {
                             document.getElementById('complete-form-error').style.display = 'block';
                             document.getElementById('complete-form-error').textContent = 'Image or note required';
@@ -869,8 +881,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
                         try {
                             const res = await fetch(`/api/tasks/${taskId}/complete`, {
-                                method: 'POST',
-                                body: formData,
+                                method: 'POST',                                body: formData,
                                 credentials: 'include'
                             });
                             const data = await res.json();
@@ -889,7 +900,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             document.getElementById('complete-form-error').style.display = 'block';
                             document.getElementById('complete-form-error').textContent = 'Server error';
                         }
-                    });
+                    }));
                 }
 
                 if (closeCompleteModal) {
@@ -905,14 +916,17 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
                     });
                 }
-            })
-            .catch(err => {
+            } catch (err) {
                 console.error('Current user fetch error:', err);
-                window.location.href = '/login';
-            });
+                if (window.location.pathname !== '/login') {
+                    window.location.href = '/login';
+                }
+            }
+        }
+        loadTasksPage();
 
         function loadTasks(type) {
-            fetch('/api/tasks', { credentials: 'include' })
+            fetchWithCredentials('/api/tasks')
                 .then(res => res.json())
                 .then(tasks => {
                     const tasksGrid = tasksContainer.querySelector('.tasks');
@@ -1007,7 +1021,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Issues page
     if (issuesContainer && window.location.pathname === '/issues') {
         function loadIssues() {
-            fetch('/api/issues', { credentials: 'include' })
+            fetchWithCredentials('/api/issues')
                 .then(res => res.json())
                 .then(issues => {
                     const issuesGrid = issuesContainer.querySelector('.tasks');
@@ -1038,7 +1052,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     document.querySelectorAll('.create-task-btn').forEach(btn => {
                         btn.addEventListener('click', () => {
                             const card = btn.closest('.issue-card');
-                            fetch('/api/issues', { credentials: 'include' })
+                            fetchWithCredentials('/api/issues')
                                 .then(res => res.json())
                                 .then(issues => {
                                     const issue = issues.find(i => i.id == parseInt(card.dataset.id));
@@ -1058,9 +1072,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     document.querySelectorAll('.delete-btn').forEach(btn => {
                         btn.addEventListener('click', () => {
                             const card = btn.closest('.issue-card');
-                            fetch(`/api/issues/${card.dataset.id}`, {
-                                method: 'DELETE',
-                                credentials: 'include'
+                            fetchWithCredentials(`/api/issues/${card.dataset.id}`, {
+                                method: 'DELETE'
                             })
                                 .then(res => res.json())
                                 .then(data => {
@@ -1111,10 +1124,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     const formData = new FormData(taskFromIssueForm);
                     formData.append('existing_image', taskFromIssueForm.dataset.existingImage || '');
                     try {
-                        const res = await fetch('/api/tasks/from-issue', {
+                        const res = await fetchWithCredentials('/api/tasks/from-issue', {
                             method: 'POST',
-                            body: formData,
-                            credentials: 'include'
+                            body: formData
                         });
                         const data = await res.json();
                         if (data.success) {
