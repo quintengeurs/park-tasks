@@ -94,7 +94,7 @@ db.serialize(() => {
     `);
 
     // Seed default admin user if no users exist
-    setTimeout(() => { // Delay to ensure ALTER TABLE completes
+    setTimeout(() => {
         db.get('SELECT COUNT(*) as count FROM users', [], async (err, row) => {
             if (err) {
                 console.error('Error checking users count:', err.message);
@@ -122,7 +122,7 @@ db.serialize(() => {
                 console.log('Users table already contains data, skipping seeding.');
             }
         });
-    }, 1000); // 1-second delay
+    }, 1000);
 });
 
 // Multer setup
@@ -251,11 +251,20 @@ app.get('/api/current-user', (req, res) => {
 
 // Users
 app.get('/api/users', ensureAuthenticated, (req, res) => {
-    db.all('SELECT id, username, role, permissions FROM users', [], async (err, users) => {
+    db.all('SELECT id, username, role, permissions FROM users', [], (err, users) => {
         if (err) {
-            console.error('users error:', err.message);
-            return res.json(users.message);
+            console.error('Users fetch error:', err.message);
+            return res.json({ success: false, message: 'Server error' });
         }
+        users.forEach(user => {
+            try {
+                user.permissions = JSON.parse(user.permissions || '["tasks"]');
+            } catch (err) {
+                console.error('Permissions parse error for user:', user.username, err.message);
+                user.permissions = ['tasks'];
+            }
+        });
+        res.json(users);
     });
 });
 
@@ -271,14 +280,14 @@ app.post('/api/users', ensureAuthenticated, async (req, res) => {
             [username, hashedPassword, role, JSON.stringify(permissions)],
             function(err) {
                 if (err) {
-                    console.error('User creation error:', err);
+                    console.error('User creation error:', err.message);
                     return res.json({ success: false, message: 'Failed to create user' });
                 }
                 res.json({ success: true });
             }
         );
     } catch (err) {
-        console.error('User creation error:', err);
+        console.error('User creation error:', err.message);
         res.json({ success: false, message: 'Server error' });
     }
 });
@@ -295,7 +304,7 @@ app.put('/api/users/:id', ensureAuthenticated, async (req, res) => {
     params.push(req.params.id);
     db.run(query, params, function(err) {
         if (err) {
-            console.error('User update error:', err);
+            console.error('User update error:', err.message);
             return res.json({ success: false, message: 'Failed to update user' });
         }
         if (this.changes === 0) {
@@ -308,7 +317,7 @@ app.put('/api/users/:id', ensureAuthenticated, async (req, res) => {
 app.delete('/api/users/:id', ensureAuthenticated, (req, res) => {
     db.run('DELETE FROM users WHERE id = ?', [req.params.id], function(err) {
         if (err) {
-            console.error('User deletion error:', err);
+            console.error('User deletion error:', err.message);
             return res.json({ success: false, message: 'Failed to delete user' });
         }
         if (this.changes === 0) {
@@ -322,7 +331,7 @@ app.delete('/api/users/:id', ensureAuthenticated, (req, res) => {
 app.get('/api/tasks', ensureAuthenticated, (req, res) => {
     db.all('SELECT * FROM tasks', [], (err, tasks) => {
         if (err) {
-            console.error('Tasks fetch error:', err);
+            console.error('Tasks fetch error:', err.message);
             return res.json({ success: false, message: 'Server error' });
         }
         res.json(tasks);
@@ -347,7 +356,7 @@ app.post('/api/tasks', ensureAuthenticated, upload.single('image'), (req, res) =
         [title, type, description || null, due_date || null, urgency, allocated_to || null, season || 'all', image, false, false, recurrence || null],
         function(err) {
             if (err) {
-                console.error('Task insertion error:', err);
+                console.error('Task insertion error:', err.message);
                 return res.json({ success: false, message: 'Failed to add task' });
             }
             wss.clients.forEach(client => {
@@ -368,19 +377,20 @@ app.put('/api/tasks/:id', ensureAuthenticated, upload.single('image'), (req, res
         [title, type, description || null, due_date || null, urgency, allocated_to || null, season || 'all', image, recurrence || null, req.params.id],
         function(err) {
             if (err) {
-                console.error('Task update error:', err);
-            return res.json({ success: false, message: 'Failed to update task' });
-        }
-        if (this.changes === 0) {
-            return res.json({ success: false, message: 'Task not found' });
-        }
-        wss.clients.forEach(client => {
-            if (client.readyState === WebSocket.OPEN) {
-                client.send(JSON.stringify({ type: 'updated_task', id: req.params.id }));
+                console.error('Task update error:', err.message);
+                return res.json({ success: false, message: 'Failed to update task' });
             }
-        });
-        res.json({ success: true });
-    });
+            if (this.changes === 0) {
+                return res.json({ success: false, message: 'Task not found' });
+            }
+            wss.clients.forEach(client => {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.send(JSON.stringify({ type: 'updated_task', id: req.params.id }));
+                }
+            });
+            res.json({ success: true });
+        }
+    );
 });
 
 app.post('/api/tasks/:id/complete', ensureAuthenticated, upload.single('completion_image'), (req, res) => {
@@ -395,7 +405,7 @@ app.post('/api/tasks/:id/complete', ensureAuthenticated, upload.single('completi
         [true, completion_image, completion_note || null, req.params.id],
         function(err) {
             if (err) {
-                console.error('Task completion error:', err);
+                console.error('Task completion error:', err.message);
                 return res.json({ success: false, message: 'Failed to complete task' });
             }
             if (this.changes === 0) {
@@ -417,7 +427,7 @@ app.post('/api/tasks/:id/archive', ensureAuthenticated, (req, res) => {
         [true, req.params.id],
         function(err) {
             if (err) {
-                console.error('Task archive error:', err);
+                console.error('Task archive error:', err.message);
                 return res.json({ success: false, message: 'Failed to archive task' });
             }
             if (this.changes === 0) {
@@ -439,7 +449,7 @@ app.post('/api/tasks/:id/unarchive', ensureAuthenticated, (req, res) => {
         [false, req.params.id],
         function(err) {
             if (err) {
-                console.error('Task unarchive error:', err);
+                console.error('Task unarchive error:', err.message);
                 return res.json({ success: false, message: 'Failed to unarchive task' });
             }
             if (this.changes === 0) {
@@ -458,7 +468,7 @@ app.post('/api/tasks/:id/unarchive', ensureAuthenticated, (req, res) => {
 app.delete('/api/tasks/:id', ensureAuthenticated, (req, res) => {
     db.run('DELETE FROM tasks WHERE id = ?', [req.params.id], function(err) {
         if (err) {
-            console.error('Task deletion error:', err);
+            console.error('Task deletion error:', err.message);
             return res.json({ success: false, message: 'Failed to delete task' });
         }
         if (this.changes === 0) {
@@ -486,11 +496,11 @@ app.post('/api/tasks/from-issue', ensureAuthenticated, upload.single('image'), (
         [title, type, description || null, due_date || null, urgency, allocated_to || null, season || 'all', image, false, false, recurrence || null],
         function(err) {
             if (err) {
-                console.error('Task from issue error:', err);
+                console.error('Task from issue error:', err.message);
                 return res.json({ success: false, message: 'Failed to create task' });
             }
             db.run('DELETE FROM issues WHERE id = ?', [issue_id], (err) => {
-                if (err) console.error('Issue deletion error:', err);
+                if (err) console.error('Issue deletion error:', err.message);
             });
             wss.clients.forEach(client => {
                 if (client.readyState === WebSocket.OPEN) {
@@ -506,7 +516,7 @@ app.post('/api/tasks/from-issue', ensureAuthenticated, upload.single('image'), (
 app.get('/api/issues', ensureAuthenticated, (req, res) => {
     db.all('SELECT * FROM issues ORDER BY created_at DESC', [], (err, issues) => {
         if (err) {
-            console.error('Issues fetch error:', err);
+            console.error('Issues fetch error:', err.message);
             return res.json({ success: false, message: 'Server error' });
         }
         res.json(issues);
@@ -527,7 +537,7 @@ app.post('/api/issues', ensureAuthenticated, upload.single('image'), (req, res) 
         [location, urgency, image, description || null, raised_by, created_at],
         function(err) {
             if (err) {
-                console.error('Issue creation error:', err);
+                console.error('Issue creation error:', err.message);
                 return res.json({ success: false, message: 'Failed to add issue' });
             }
             wss.clients.forEach(client => {
@@ -543,7 +553,7 @@ app.post('/api/issues', ensureAuthenticated, upload.single('image'), (req, res) 
 app.delete('/api/issues/:id', ensureAuthenticated, (req, res) => {
     db.run('DELETE FROM issues WHERE id = ?', [req.params.id], function(err) {
         if (err) {
-            console.error('Issue deletion error:', err);
+            console.error('Issue deletion error:', err.message);
             return res.json({ success: false, message: 'Failed to delete issue' });
         }
         if (this.changes === 0) {
