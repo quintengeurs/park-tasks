@@ -21,7 +21,6 @@ const db = new sqlite3.Database(dbPath, (err) => {
 
 // Database migration and seeding
 db.serialize(() => {
-    // Create tables
     db.run(`
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -31,7 +30,6 @@ db.serialize(() => {
         )
     `);
 
-    // Add permissions column if it doesn't exist
     db.all("PRAGMA table_info(users)", (err, columns) => {
         if (err) {
             console.error('Error checking users table schema:', err.message);
@@ -93,7 +91,6 @@ db.serialize(() => {
         )
     `);
 
-    // Seed default admin user if no users exist
     setTimeout(() => {
         db.get('SELECT COUNT(*) as count FROM users', [], async (err, row) => {
             if (err) {
@@ -141,9 +138,15 @@ const upload = multer({ storage });
 // Sequelize for session store
 const sequelize = new Sequelize({
     dialect: 'sqlite',
-    storage: dbPath
+    storage: dbPath,
+    logging: console.log // Enable SQL logging for debugging
 });
-const sessionStore = new SequelizeStore({ db: sequelize });
+const sessionStore = new SequelizeStore({
+    db: sequelize,
+    tableName: 'Sessions',
+    checkExpirationInterval: 15 * 60 * 1000, // Clean expired sessions every 15 minutes
+    expiration: 24 * 60 * 60 * 1000 // 24 hours
+});
 sessionStore.sync();
 
 // Middleware
@@ -155,9 +158,15 @@ app.use(session({
     store: sessionStore,
     resave: false,
     saveUninitialized: false,
-    cookie: { secure: process.env.NODE_ENV === 'production', maxAge: 24 * 60 * 60 * 1000 }
+    cookie: {
+        secure: process.env.NODE_ENV === 'production',
+        httpOnly: true,
+        sameSite: 'lax', // Allow cookies for redirects
+        maxAge: 24 * 60 * 60 * 1000 // 24 hours
+    }
 }));
 app.use((req, res, next) => {
+    console.log(`Request: ${req.method} ${req.path}, SessionID: ${req.sessionID}, UserID: ${req.session.userId || 'none'}`);
     res.header('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.header('Pragma', 'no-cache');
     res.header('Expires', '0');
@@ -203,8 +212,14 @@ app.post('/api/login', (req, res) => {
                 return res.json({ success: false, message: 'Invalid credentials' });
             }
             req.session.userId = user.id;
-            console.log('Login successful:', username);
-            res.json({ success: true });
+            console.log('Login successful:', username, 'SessionID:', req.sessionID, 'UserID:', req.session.userId);
+            req.session.save(err => {
+                if (err) {
+                    console.error('Session save error:', err.message);
+                    return res.json({ success: false, message: 'Server error' });
+                }
+                res.json({ success: true });
+            });
         } catch (err) {
             console.error('Bcrypt error:', err.message);
             res.json({ success: false, message: 'Server error' });
@@ -226,7 +241,7 @@ app.post('/api/logout', (req, res) => {
 // Current user
 app.get('/api/current-user', (req, res) => {
     if (!req.session.userId) {
-        console.log('No session userId');
+        console.log('No session userId for /api/current-user, SessionID:', req.sessionID);
         return res.json(null);
     }
     db.get('SELECT id, username, role, permissions FROM users WHERE id = ?', [req.session.userId], (err, user) => {
@@ -240,7 +255,7 @@ app.get('/api/current-user', (req, res) => {
         }
         try {
             user.permissions = JSON.parse(user.permissions || '["tasks"]');
-            console.log('Current user:', user);
+            console.log('Current user:', { id: user.id, username: user.username, role: user.role, permissions: user.permissions });
             res.json(user);
         } catch (err) {
             console.error('Permissions parse error:', err.message);
