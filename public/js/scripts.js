@@ -23,6 +23,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const completeTaskModal = document.getElementById('complete-task-modal');
     const closeCompleteModal = document.getElementById('close-complete-modal');
     const completeTaskForm = document.getElementById('complete-task-form');
+    const taskFromIssueModal = document.getElementById('task-from-issue-modal');
+    const closeTaskFromIssueModal = document.getElementById('close-task-from-issue-modal');
+    const taskFromIssueForm = document.getElementById('task-from-issue-form');
 
     // Toast notification
     function showToast(message) {
@@ -149,6 +152,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const dueTodayAllocatedTo = document.getElementById('due-today-allocated-to');
         const scheduledAllocatedTo = document.getElementById('allocated-to');
         const editAllocatedToSelect = document.getElementById('edit-allocated-to');
+        const taskFromIssueAllocatedTo = taskFromIssueForm?.querySelector('select[name="allocated_to"]');
         fetch('/api/users')
             .then(res => res.json())
             .then(users => {
@@ -156,6 +160,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 dueTodayAllocatedTo.innerHTML = options;
                 scheduledAllocatedTo.innerHTML = options;
                 editAllocatedToSelect.innerHTML = options;
+                if (taskFromIssueAllocatedTo) taskFromIssueAllocatedTo.innerHTML = options;
             })
             .catch(err => console.error('Fetch users error:', err));
 
@@ -178,6 +183,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 editSeasonInput.value = btn.dataset.season;
             });
         });
+
+        const taskFromIssueSeasonButtons = taskFromIssueForm?.querySelectorAll('.season-btn');
+        const taskFromIssueSeasonInput = taskFromIssueForm?.querySelector('#task-from-issue-season-input');
+        if (taskFromIssueSeasonButtons && taskFromIssueSeasonInput) {
+            taskFromIssueSeasonButtons.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    taskFromIssueSeasonButtons.forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    taskFromIssueSeasonInput.value = btn.dataset.season;
+                });
+            });
+        }
 
         if (dueTodayTaskForm) {
             dueTodayTaskForm.addEventListener('submit', async (e) => {
@@ -305,10 +322,28 @@ document.addEventListener('DOMContentLoaded', () => {
                     completedContainer.innerHTML = '';
                     scheduledContainer.innerHTML = '';
 
+                    // Filter tasks
                     const dueTodayTasks = tasks.filter(task => !task.archived && !task.completed && task.due_date === today);
                     const completedTasks = tasks.filter(task => !task.archived && task.completed);
-                    const scheduledTasks = tasks.filter(task => !task.archived && task.recurrence);
 
+                    // Group scheduled tasks by recurrence template
+                    const scheduledTaskMap = new Map();
+                    tasks.forEach(task => {
+                        if (task.recurrence && !task.archived) {
+                            const key = `${task.title}-${task.recurrence}-${task.season || 'all'}`;
+                            if (!scheduledTaskMap.has(key)) {
+                                scheduledTaskMap.set(key, { template: task, instances: [] });
+                            }
+                            scheduledTaskMap.get(key).instances.push(task);
+                        }
+                    });
+
+                    const scheduledTasks = Array.from(scheduledTaskMap.values()).map(group => {
+                        const hasFutureInstances = group.instances.some(task => !task.completed || (task.due_date && task.due_date > today));
+                        return hasFutureInstances ? group.template : null;
+                    }).filter(task => task);
+
+                    // Render tasks
                     dueTodayTasks.forEach(task => {
                         const card = createAdminTaskCard(task, true);
                         dueTodayContainer.appendChild(card);
@@ -322,6 +357,23 @@ document.addEventListener('DOMContentLoaded', () => {
                     scheduledTasks.forEach(task => {
                         const card = createAdminTaskCard(task, false, true);
                         scheduledContainer.appendChild(card);
+                    });
+
+                    // Add image click listeners
+                    document.querySelectorAll('.completion-image, .task-image').forEach(img => {
+                        img.addEventListener('click', () => {
+                            const modal = document.createElement('div');
+                            modal.className = 'image-modal';
+                            modal.innerHTML = `
+                                <span class="close">×</span>
+                                <img src="${img.dataset.src}" alt="Full-size Image">
+                            `;
+                            document.body.appendChild(modal);
+                            modal.querySelector('.close').addEventListener('click', () => modal.remove());
+                            modal.addEventListener('click', (e) => {
+                                if (e.target === modal) modal.remove();
+                            });
+                        });
                     });
 
                     addAdminTaskEventListeners();
@@ -361,15 +413,8 @@ document.addEventListener('DOMContentLoaded', () => {
             document.querySelectorAll('.complete-btn').forEach(btn => {
                 btn.addEventListener('click', () => {
                     const card = btn.closest('.admin-task-card');
-                    fetch(`/api/tasks/${card.dataset.id}/complete`, { method: 'POST' })
-                        .then(res => res.json())
-                        .then(data => {
-                            if (data.success) {
-                                showToast('Task completed successfully!');
-                                loadAdminTasks();
-                            }
-                        })
-                        .catch(err => console.error('Complete task error:', err));
+                    completeTaskModal.style.display = 'flex';
+                    completeTaskForm.querySelector('input[name="task_id"]').value = card.dataset.id;
                 });
             });
 
@@ -422,4 +467,596 @@ document.addEventListener('DOMContentLoaded', () => {
             document.querySelectorAll('.delete-btn').forEach(btn => {
                 btn.addEventListener('click', () => {
                     const card = btn.closest('.admin-task-card');
-                    fetch(`/api/tasks/${card.dataset.id}`, { method: 'DELETE'
+                    fetch(`/api/tasks/${card.dataset.id}`, { method: 'DELETE' })
+                        .then(res => res.json())
+                        .then(data => {
+                            if (data.success) {
+                                showToast('Task deleted successfully!');
+                                card.remove();
+                                if (archiveTasksContainer && window.location.pathname === '/archive') {
+                                    loadArchiveTasks();
+                                }
+                            }
+                        })
+                        .catch(err => console.error('Delete task error:', err));
+                });
+            });
+        }
+
+        loadAdminTasks();
+    }
+
+    // Archive page
+    if (archiveTasksContainer && window.location.pathname === '/archive') {
+        function loadArchiveTasks() {
+            fetch('/api/tasks')
+                .then(res => res.json())
+                .then(tasks => {
+                    const tasksGrid = archiveTasksContainer.querySelector('.tasks');
+                    tasksGrid.innerHTML = '';
+
+                    // Filter and sort archived tasks (newest first)
+                    const archivedTasks = tasks
+                        .filter(task => task.archived)
+                        .sort((a, b) => new Date(b.due_date || '9999-12-31') - new Date(a.due_date || '9999-12-31'));
+
+                    // Render archived tasks
+                    archivedTasks.forEach(task => {
+                        const isUrgent = task.urgency === 'urgent';
+                        const card = document.createElement('div');
+                        card.className = `admin-task-card ${task.completed ? 'completed' : ''} ${isUrgent ? 'urgent' : ''}`;
+                        card.dataset.id = task.id;
+                        card.innerHTML = `
+                            <div class="task-info">
+                                <h3>${task.title}</h3>
+                                <p>Type: ${task.type}</p>
+                                <p>Due: ${task.due_date || 'None'}</p>
+                                <p>Urgency: ${task.urgency}</p>
+                                <p>Allocated To: ${task.allocated_to || 'None'}</p>
+                                <p>Season: ${task.season || 'All'}</p>
+                                ${task.recurrence ? `<p>Recurrence: ${task.recurrence}</p>` : ''}
+                                ${task.completion_note ? `<p>Completion Note: ${task.completion_note}</p>` : ''}
+                                ${task.completion_image ? `<img src="${task.completion_image}" alt="Completion Image" class="completion-image" data-src="${task.completion_image}">` : ''}
+                            </div>
+                            <div class="task-actions">
+                                ${task.completed ? `<p class="completed-note">Task Completed</p>` : ''}
+                                <button class="unarchive-btn">Unarchive</button>
+                                <button class="delete-btn">Delete</button>
+                            </div>
+                        `;
+                        tasksGrid.appendChild(card);
+                    });
+
+                    // Add event listeners
+                    document.querySelectorAll('.unarchive-btn').forEach(btn => {
+                        btn.addEventListener('click', () => {
+                            const card = btn.closest('.admin-task-card');
+                            fetch(`/api/tasks/${card.dataset.id}/unarchive`, { method: 'POST' })
+                                .then(res => res.json())
+                                .then(data => {
+                                    if (data.success) {
+                                        showToast('Task unarchived successfully!');
+                                        card.remove();
+                                    }
+                                })
+                                .catch(err => console.error('Unarchive task error:', err));
+                        });
+                    });
+
+                    document.querySelectorAll('.delete-btn').forEach(btn => {
+                        btn.addEventListener('click', () => {
+                            const card = btn.closest('.admin-task-card');
+                            fetch(`/api/tasks/${card.dataset.id}`, { method: 'DELETE' })
+                                .then(res => res.json())
+                                .then(data => {
+                                    if (data.success) {
+                                        showToast('Task deleted successfully!');
+                                        card.remove();
+                                    }
+                                })
+                                .catch(err => console.error('Delete task error:', err));
+                        });
+                    });
+
+                    document.querySelectorAll('.completion-image, .task-image').forEach(img => {
+                        img.addEventListener('click', () => {
+                            const modal = document.createElement('div');
+                            modal.className = 'image-modal';
+                            modal.innerHTML = `
+                                <span class="close">×</span>
+                                <img src="${img.dataset.src}" alt="Full-size Image">
+                            `;
+                            document.body.appendChild(modal);
+                            modal.querySelector('.close').addEventListener('click', () => modal.remove());
+                            modal.addEventListener('click', (e) => {
+                                if (e.target === modal) modal.remove();
+                            });
+                        });
+                    });
+                })
+                .catch(err => console.error('Archive tasks fetch error:', err));
+        }
+
+        loadArchiveTasks();
+    }
+
+    // Staff page
+    if (usersList && userForm && window.location.pathname === '/staff') {
+        addUserBtn.addEventListener('click', () => {
+            modalTitle.textContent = 'Add User';
+            userForm.reset();
+            userForm.querySelector('input[name="id"]').value = '';
+            userForm.querySelectorAll('input[name="permissions"]').forEach(checkbox => {
+                checkbox.checked = checkbox.value === 'tasks';
+            });
+            userModal.style.display = 'flex';
+        });
+
+        closeModal.addEventListener('click', () => {
+            userModal.style.display = 'none';
+        });
+
+        window.addEventListener('click', (e) => {
+            if (e.target === userModal) {
+                userModal.style.display = 'none';
+            }
+        });
+
+        userForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const id = userForm.querySelector('input[name="id"]').value;
+            const username = userForm.querySelector('input[name="username"]').value;
+            const password = userForm.querySelector('input[name="password"]').value;
+            const role = userForm.querySelector('select[name="role"]').value;
+            const permissions = Array.from(userForm.querySelectorAll('input[name="permissions"]:checked')).map(cb => cb.value);
+
+            if (!permissions.length) {
+                document.getElementById('modal-error').style.display = 'block';
+                document.getElementById('modal-error').textContent = 'At least one page access is required';
+                return;
+            }
+
+            const url = id ? `/api/users/${id}` : '/api/users';
+            const method = id ? 'PUT' : 'POST';
+            const body = { username, role, permissions };
+            if (password) body.password = password;
+
+            try {
+                const res = await fetch(url, {
+                    method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const data = await res.json();
+                if (data.success) {
+                    userModal.style.display = 'none';
+                    userForm.reset();
+                    document.getElementById('modal-error').style.display = 'none';
+                    showToast(id ? 'User updated successfully!' : 'User created successfully!');
+                    loadUsers();
+                } else {
+                    document.getElementById('modal-error').style.display = 'block';
+                    document.getElementById('modal-error').textContent = data.message || 'Failed to save user';
+                }
+            } catch (err) {
+                console.error('User save error:', err);
+                document.getElementById('modal-error').style.display = 'block';
+                document.getElementById('modal-error').textContent = 'Server error';
+            }
+        });
+
+        function loadUsers() {
+            fetch('/api/users')
+                .then(res => res.json())
+                .then(users => {
+                    usersList.innerHTML = '';
+                    users.forEach(user => {
+                        const userId = user.id;
+                        const card = document.createElement('div');
+                        card.className = 'user-card';
+                        card.dataset.id = userId;
+                        card.innerHTML = `
+                            <div class="user-info">
+                                <h3>${user.username}</h3>
+                                <p>Role: ${user.role}</p>
+                                <p>Access: ${user.permissions.join(', ')}</p>
+                            </div>
+                            <div class="user-actions">
+                                <button class="edit-btn">Edit</button>
+                                <button class="delete-btn">Delete</button>
+                            </div>
+                        `;
+                        usersList.appendChild(card);
+                    });
+
+                    document.querySelectorAll('.edit-btn').forEach(btn => {
+                        btn.addEventListener('click', () => {
+                            const card = btn.closest('.user-card');
+                            const userId = parseInt(card.dataset.id);
+                            fetch('/api/users')
+                                .then(res => res.json())
+                                .then(users => {
+                                    const user = users.find(u => u.id === userId);
+                                    modalTitle.textContent = 'Edit User';
+                                    userForm.querySelector('input[name="id"]').value = user.id;
+                                    userForm.querySelector('input[name="username"]').value = user.username;
+                                    userForm.querySelector('input[name="password"]').value = '';
+                                    userForm.querySelector('select[name="role"]').value = user.role;
+                                    userForm.querySelectorAll('input[name="permissions"]').forEach(checkbox => {
+                                        checkbox.checked = user.permissions.includes(checkbox.value);
+                                    });
+                                    userModal.style.display = 'flex';
+                                })
+                                .catch(err => console.error('Fetch user error:', err));
+                        });
+                    });
+
+                    document.querySelectorAll('.delete-btn').forEach(btn => {
+                        btn.addEventListener('click', () => {
+                            const card = btn.closest('.user-card');
+                            fetch(`/api/users/${card.dataset.id}`, { method: 'DELETE' })
+                                .then(res => res.json())
+                                .then(data => {
+                                    if (data.success) {
+                                        showToast('User deleted successfully!');
+                                        card.remove();
+                                    }
+                                })
+                                .catch(err => console.error('Delete user error:', err));
+                        });
+                    });
+                })
+                .catch(err => console.error('Users fetch error:', err));
+        }
+
+        loadUsers();
+    }
+
+    // Tasks page
+    if (tasksContainer && window.location.pathname === '/') {
+        const filterButtons = document.querySelectorAll('.tasks');
+        let currentUser = null;
+        fetch('/api/current-user')
+            .then(res => res.json())
+            .then(user => {
+                if (!user) {
+                    window.location.href = '/login';
+                    return;
+                }
+                currentUser = user;
+                filterButtons.forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        filterButtons.forEach(b => b.classList.remove('active'));
+                        btn.classList.add('active');
+                        loadTasks(btn.dataset.type);
+                    });
+                });
+
+                const defaultType = window.innerWidth <= 600 ? 'maintenance' : 'all';
+                document.querySelector(`.filter-btn[data-type="${defaultType}"]`)?.classList.add('active');
+                loadTasks(defaultType);
+
+                // Raise issue button
+                if (raiseIssueBtn) {
+                    raiseIssueBtn.addEventListener('click', () => {
+                        issueForm.querySelector('input[name="raised_by"]').value = currentUser.username;
+                        issueModal.style.display = 'flex';
+                    });
+                }
+
+                if (closeIssueModal) {
+                    closeIssueModal.addEventListener('click', () => {
+                        issueModal.style.display = 'none';
+                    });
+                }
+
+                if (issueModal) {
+                    window.addEventListener('click', (e) => {
+                        if (e.target === issueModal) {
+                            issueModal.style.display = 'none';
+                        }
+                    });
+                }
+
+                if (issueForm) {
+                    issueForm.addEventListener('submit', async (e) => {
+                        e.preventDefault();
+                        const formData = new FormData(issueForm);
+                        try {
+                            const res = await fetch('/api/issues', {
+                                method: 'POST',
+                                body: formData
+                            });
+                            const data = await res.json();
+                            if (data.success) {
+                                issueModal.style.display = 'none';
+                                issueForm.reset();
+                                document.getElementById('issue-form-error').style.display = 'none';
+                                showToast('Issue raised successfully!');
+                                if (issuesContainer && window.location.pathname === '/issues') {
+                                    loadIssues();
+                                }
+                            } else {
+                                document.getElementById('issue-form-error').style.display = 'block';
+                                document.getElementById('issue-form-error').textContent = data.message || 'Failed to raise issue';
+                            }
+                        } catch (err) {
+                            console.error('Issue creation error:', err);
+                            document.getElementById('issue-form-error').style.display = 'block';
+                            document.getElementById('issue-form-error').textContent = 'Server error';
+                        }
+                    });
+                }
+
+                if (completeTaskForm) {
+                    completeTaskForm.addEventListener('submit', async (e) => {
+                        e.preventDefault();
+                        const formData = new FormData(completeTaskForm);
+                        const taskId = formData.get('task_id');
+                        const completionImage = formData.get('completion_image');
+                        const completionNote = formData.get('completion_note');
+                        if (!completionImage && !completionNote) {
+                            document.getElementById('complete-form-error').style.display = 'block';
+                            return;
+                        }
+                        try {
+                            const res = await fetch(`/api/tasks/${taskId}/complete`, {
+                                method: 'POST',
+                                body: formData
+                            });
+                            const data = await res.json();
+                            if (data.success) {
+                                completeTaskModal.style.display = 'none';
+                                completeTaskForm.reset();
+                                document.getElementById('complete-form-error').style.display = 'none';
+                                showToast('Task completed successfully!');
+                                loadTasks(document.querySelector('.filter-btn.active')?.dataset.type || 'maintenance');
+                            } else {
+                                document.getElementById('complete-form-error').style.display = 'block';
+                                document.getElementById('complete-form-error').textContent = data.message || 'Failed to complete task';
+                            }
+                        } catch (err) {
+                            console.error('Task completion error:', err);
+                            document.getElementById('complete-form-error').style.display = 'block';
+                            document.getElementById('complete-form-error').textContent = 'Server error';
+                        }
+                    });
+                }
+
+                if (closeCompleteModal) {
+                    closeCompleteModal.addEventListener('click', () => {
+                        completeTaskModal.style.display = 'none';
+                    });
+                }
+
+                if (completeTaskModal) {
+                    window.addEventListener('click', (e) => {
+                        if (e.target === completeTaskModal) {
+                            completeTaskModal.style.display = 'none';
+                        }
+                    });
+                }
+            })
+            .catch(err => {
+                console.error('Current user fetch error:', err);
+                window.location.href = '/login';
+            });
+
+        function loadTasks(type) {
+            fetch('/api/tasks')
+                .then(res => res.json())
+                .then(tasks => {
+                    const tasksGrid = tasksContainer.querySelector('.tasks');
+                    tasksGrid.innerHTML = '';
+                    const today = new Date().toISOString().split('T')[0];
+                    const currentSeason = getCurrentSeason();
+
+                    let filteredTasks = tasks
+                        .filter(task => !task.archived)
+                        .filter(task => !task.completed)
+                        .filter(task => {
+                            if (task.due_date) {
+                                return task.due_date <= today;
+                            }
+                            return task.season === 'all' || task.season === currentSeason;
+                        });
+
+                    if (currentUser.role !== 'admin') {
+                        filteredTasks = filteredTasks.filter(task => task.allocated_to === currentUser.username);
+                    }
+
+                    filteredTasks = filteredTasks.filter(task => {
+                        if (type === 'all') return true;
+                        if (type === 'allocated') return task.allocated_to === currentUser.username;
+                        return task.type === type;
+                    });
+
+                    filteredTasks.forEach(task => {
+                        const isDueToday = task.due_date === today;
+                        const isOverdue = task.due_date && task.due_date < today;
+                        const isUrgent = task.urgency === 'urgent';
+                        const card = document.createElement('div');
+                        card.className = `task-card ${task.completed ? 'completed' : ''} ${isUrgent ? 'urgent' : ''} ${isOverdue ? 'overdue' : ''}`;
+                        card.dataset.id = task.id;
+                        card.innerHTML = `
+                            <h3 class="task-title">${task.title}</h3>
+                            <p class="task-type">Type: ${task.type}</p>
+                            <div class="task-details collapsed">
+                                <p>Description: ${task.description || 'None'}</p>
+                                <p>Due: ${task.due_date || 'None'}</p>
+                                <p>Urgency: ${task.urgency}</p>
+                                <p>Allocated To: ${task.allocated_to || 'None'}</p>
+                                <p>Season: ${task.season || 'All'}</p>
+                                ${task.recurrence ? `<p>Recurrence: ${task.recurrence}</p>` : ''}
+                                ${task.image ? `<img src="${task.image}" alt="Task Image" class="task-image" data-src="${task.image}">` : ''}
+                                ${task.completed ? `<p class="completed-note">Task Completed</p>` : ''}
+                                ${!task.completed ? `<button class="complete-btn">Task Completed</button>` : ''}
+                            </div>
+                        `;
+                        tasksGrid.appendChild(card);
+                    });
+
+                    document.querySelectorAll('.task-title').forEach(title => {
+                        title.addEventListener('click', (e) => {
+                            e.preventDefault();
+                            const card = title.closest('.task-card');
+                            const details = card.querySelector('.task-details');
+                            details.classList.toggle('collapsed');
+                        });
+                    });
+
+                    document.querySelectorAll('.complete-btn').forEach(btn => {
+                        btn.addEventListener('click', () => {
+                            const card = btn.closest('.task-card');
+                            completeTaskModal.style.display = 'flex';
+                            completeTaskForm.querySelector('input[name="task_id"]').value = card.dataset.id;
+                        });
+                    });
+
+                    document.querySelectorAll('.task-image').forEach(img => {
+                        img.addEventListener('click', () => {
+                            const modal = document.createElement('div');
+                            modal.className = 'image-modal';
+                            modal.innerHTML = `
+                                <span class="close">×</span>
+                                <img src="${img.dataset.src}" alt="Full-size Task Image">
+                            `;
+                            document.body.appendChild(modal);
+                            modal.querySelector('.close').addEventListener('click', () => modal.remove());
+                            modal.addEventListener('click', (e) => {
+                                if (e.target === modal) modal.remove();
+                            });
+                        });
+                    });
+                })
+                .catch(err => console.error('Tasks fetch error:', err));
+        }
+    }
+
+    // Issues page
+    if (issuesContainer && window.location.pathname === '/issues') {
+        function loadIssues() {
+            fetch('/api/issues')
+                .then(res => res.json())
+                .then(issues => {
+                    const issuesGrid = issuesContainer.querySelector('.tasks');
+                    issuesGrid.innerHTML = '';
+
+                    issues.forEach(issue => {
+                        const isUrgent = issue.urgency === 'urgent';
+                        const card = document.createElement('div');
+                        card.className = `issue-card ${isUrgent ? 'urgent' : ''}`;
+                        card.dataset.id = issue.id;
+                        card.innerHTML = `
+                            <div class="issue-info">
+                                <h3>${issue.location}</h3>
+                                <p>Urgency: ${issue.urgency}</p>
+                                <p>Description: ${issue.description || 'None'}</p>
+                                <p>Raised By: ${issue.raised_by}</p>
+                                <p>Created: ${new Date(issue.created_at).toLocaleString()}</p>
+                                ${issue.image ? `<img src="${issue.image}" alt="Issue Image" class="task-image" data-src="${issue.image}">` : ''}
+                            </div>
+                            <div class="issue-actions">
+                                <button class="create-task-btn">Create Task</button>
+                                <button class="delete-btn">Delete</button>
+                            </div>
+                        `;
+                        issuesGrid.appendChild(card);
+                    });
+
+                    document.querySelectorAll('.create-task-btn').forEach(btn => {
+                        btn.addEventListener('click', () => {
+                            const card = btn.closest('.issue-card');
+                            fetch('/api/issues')
+                                .then(res => res.json())
+                                .then(issues => {
+                                    const issue = issues.find(i => i.id == parseInt(card.dataset.id));
+                                    taskFromIssueForm.querySelector('input[name="issue_id"]').value = issue.id;
+                                    taskFromIssueForm.querySelector('input[name="title"]').value = `Issue: ${issue.location}`;
+                                    taskFromIssueForm.querySelector('textarea[name="description"]').value = issue.description || '';
+                                    taskFromIssueForm.querySelector('select[name="urgency"]').value = issue.urgency;
+                                    taskFromIssueForm.dataset.existingImage = issue.image || '';
+                                    taskFromIssueModal.style.display = 'flex';
+                                })
+                                .catch(err => console.error('Fetch issue error:', err));
+                        });
+                    });
+
+                    document.querySelectorAll('.delete-btn').forEach(btn => {
+                        btn.addEventListener('click', () => {
+                            const card = btn.closest('.issue-card');
+                            fetch(`/api/issues/${card.dataset.id}`, { method: 'DELETE' })
+                                .then(res => res.json())
+                                .then(data => {
+                                    if (data.success) {
+                                        showToast('Issue deleted successfully!');
+                                        card.remove();
+                                    }
+                                })
+                                .catch(err => console.error('Delete issue error:', err));
+                        });
+                    });
+
+                    document.querySelectorAll('.task-image').forEach(img => {
+                        img.addEventListener('click', () => {
+                            const modal = document.createElement('div');
+                            modal.className = 'image-modal';
+                            modal.innerHTML = `
+                                <span class="modal-close">×</span>
+                                <img src="${img.dataset.src}" alt="Full-size Issue Image">
+                            `;
+                            document.body.appendChild(modal);
+                            modal.querySelector('.close').addEventListener('click', () => modal.remove());
+                            modal.addEventListener('click', (e) => {
+                                if (e.target === modal) {
+                                    modal.remove();
+                                }
+                            });
+                        });
+                    });
+                })
+                .catch(err => console.error('Issues fetch error:', err));
+        }
+
+        if (taskFromIssueModal) {
+            closeTaskFromIssueModal.addEventListener('click', () => {
+                taskFromIssueModal.style.display = 'none';
+            });
+
+            window.addEventListener('click', (e) => {
+                if (e.target === taskFromIssueModal) {
+                    taskFromIssueModal.style.display = 'none';
+                }
+            });
+
+            taskFromIssueForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const formData = new FormData(taskFromIssueForm);
+                formData.append('existing_image', taskFromIssueForm.dataset.existingImage || '');
+                try {
+                    const res = await fetch('/api/tasks/from-issue', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        taskFromIssueModal.style.display = 'none';
+                        taskFromIssueForm.reset();
+                        document.getElementById('task-from-issue-form-error').style.display = 'none';
+                        showToast('Task created from issue successfully!');
+                        loadIssues();
+                    } else {
+                        document.getElementById('task-from-issue-error').style.display = 'block';
+                        document.getElementById('task-from-issue-form-error').textContent = data.message || 'Failed to create task';
+                    }
+                } catch (err) {
+                    console.error('Task from issue error:', err);
+                    document.getElementById('task-from-issue-error').style.display = 'block';
+                    document arkadaElementById('form-error').textContent = 'Server error';
+                }
+            });
+        }
+
+        loadIssues();
+    }
+});
