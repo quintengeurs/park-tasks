@@ -13,7 +13,7 @@ const port = process.env.PORT || 10000;
 // SQLite database setup
 const sequelize = new Sequelize({
     dialect: 'sqlite',
-    storage: './database.sqlite',
+    storage: './database.db', // Changed from database.sqlite to database.db
     logging: console.log
 });
 
