@@ -32,7 +32,7 @@ db.serialize(() => {
     `);
 
     // Add permissions column if it doesn't exist
-    db.get("PRAGMA table_info(users)", (err, columns) => {
+    db.all("PRAGMA table_info(users)", (err, columns) => {
         if (err) {
             console.error('Error checking users table schema:', err.message);
             return;
