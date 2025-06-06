@@ -7,7 +7,7 @@ const WebSocket = require('ws');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const { Sequelize } = require('sequelize'); // Added for SequelizeStore
+const { Sequelize } = require('sequelize');
 
 const app = express();
 const port = process.env.PORT || 10000;
@@ -20,6 +20,7 @@ const db = new sqlite3.Database(dbPath, (err) => {
 });
 
 db.serialize(() => {
+    // Create tables
     db.run(`
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -66,6 +67,35 @@ db.serialize(() => {
             data TEXT
         )
     `);
+
+    // Seed default admin user if no users exist
+    db.get('SELECT COUNT(*) as count FROM users', [], async (err, row) => {
+        if (err) {
+            console.error('Error checking users count:', err);
+            return;
+        }
+        if (row.count === 0) {
+            console.log('No users found, seeding default admin user...');
+            try {
+                const hashedPassword = await bcrypt.hash('admin123', 10);
+                db.run(
+                    'INSERT INTO users (username, password, role, permissions) VALUES (?, ?, ?, ?)',
+                    ['admin', hashedPassword, 'admin', '["tasks","admin","archive","staff","issues"]'],
+                    (err) => {
+                        if (err) {
+                            console.error('Error seeding admin user:', err);
+                        } else {
+                            console.log('Default admin user created: username=admin, password=admin123');
+                        }
+                    }
+                );
+            } catch (err) {
+                console.error('Error hashing password for admin user:', err);
+            }
+        } else {
+            console.log('Users table already contains data, skipping seeding.');
+        }
+    });
 });
 
 // Multer setup
@@ -92,7 +122,7 @@ sessionStore.sync();
 // Middleware
 app.use(express.static('public'));
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: false }));
 app.use(session({
     secret: process.env.SESSION_SECRET || 'your-secret-key',
     store: sessionStore,
@@ -125,7 +155,6 @@ app.get('/archive', ensureAuthenticated, (req, res) => res.sendFile(path.join(__
 app.get('/staff', ensureAuthenticated, (req, res) => res.sendFile(path.join(__dirname, 'public', 'staff.html')));
 app.get('/issues', ensureAuthenticated, (req, res) => res.sendFile(path.join(__dirname, 'public', 'issues.html')));
 app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'public', 'login.html')));
-
 
 // Login
 app.post('/api/login', (req, res) => {
@@ -322,19 +351,18 @@ app.put('/api/tasks/:id', ensureAuthenticated, upload.single('image'), (req, res
         function(err) {
             if (err) {
                 console.error('Task update error:', err);
-                return res.json({ success: false, message: 'Failed to update task' });
-            }
-            if (this.changes === 0) {
-                return res.json({ success: false, message: 'Task not found' });
-            }
-            wss.clients.forEach(client => {
-                if (client.readyState === WebSocket.OPEN) {
-                    client.send(JSON.stringify({ type: 'updated_task', id: req.params.id }));
-                }
-            });
-            res.json({ success: true });
+            return res.json({ success: false, message: 'Failed to update task' });
         }
-    );
+        if (this.changes === 0) {
+            return res.json({ success: false, message: 'Task not found' });
+        }
+        wss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+                client.send(JSON.stringify({ type: 'updated_task', id: req.params.id }));
+            }
+        });
+        res.json({ success: true });
+    });
 });
 
 app.post('/api/tasks/:id/complete', ensureAuthenticated, upload.single('completion_image'), (req, res) => {
@@ -457,30 +485,14 @@ app.post('/api/tasks/from-issue', ensureAuthenticated, upload.single('image'), (
 });
 
 // Issues
-app.post('/api/issues', ensureAuthenticated, upload.single('image'), (req, res) => {
-    const { location, urgency, description, raised_by } = req.body;
-    const image = req.file ? `/uploads/${req.file.filename}` : null;
-    const created_at = new Date().toISOString();
-    if (!location || !urgency || !raised_by) {
-        console.error('Missing required fields for issue:', { location, urgency, raised_by });
-        return res.json({ success: false, message: 'Location, urgency, and raised_by are required' });
-    }
-    db.run(
-        `INSERT INTO issues (location, urgency, image, description, raised_by, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-        [location, urgency, image, description || null, raised_by, created_at],
-        function(err) {
-            if (err) {
-                console.error('Issue creation error:', err);
-                return res.json({ success: false, message: 'Failed to add issue' });
-            }
-            wss.clients.forEach(client => {
-                if (client.readyState === WebSocket.OPEN) {
-                    client.send(JSON.stringify({ type: 'new_issue', id: this.lastID }));
-                }
-            });
-            res.json({ success: true });
+app.get('/api/issues', ensureAuthenticated, (req, res) => {
+    db.all('SELECT * FROM issues ORDER BY created_at DESC', [], (err, issues) => {
+        if (err) {
+            console.error('Issues fetch error:', err);
+            return res.json({ success: false, message: 'Server error' });
         }
-    );
+        res.json(issues);
+    });
 });
 
 app.post('/api/issues', ensureAuthenticated, upload.single('image'), (req, res) => {
@@ -498,15 +510,16 @@ app.post('/api/issues', ensureAuthenticated, upload.single('image'), (req, res) 
         function(err) {
             if (err) {
                 console.error('Issue creation error:', err);
-            return res.json({ success: false, message: 'Failed to add issue' });
-        }
-        wss.clients.forEach(client => {
-            if (client.readyState === WebSocket.OPEN) {
-                client.send(JSON.stringify({ type: 'new_issue', id: this.lastID }));
+                return res.json({ success: false, message: 'Failed to add issue' });
             }
-        });
-        res.json({ success: true });
-    });
+            wss.clients.forEach(client => {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.send(JSON.stringify({ type: 'new_issue', id: this.lastID }));
+                }
+            });
+            res.json({ success: true });
+        }
+    );
 });
 
 app.delete('/api/issues/:id', ensureAuthenticated, (req, res) => {
