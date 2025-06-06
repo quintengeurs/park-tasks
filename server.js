@@ -1,6 +1,7 @@
 const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
 const session = require('express-session');
+const SequelizeStore = require('connect-session-sequelize')(session.Store);
 const bcrypt = require('bcrypt');
 const WebSocket = require('ws');
 const multer = require('multer');
@@ -8,10 +9,11 @@ const path = require('path');
 const fs = require('fs');
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 10000;
 
 // Database setup
-const db = new sqlite3.Database('./database.db', (err) => {
+const dbPath = process.env.NODE_ENV === 'production' ? '/opt/render/project/src/database.db' : './database.db';
+const db = new sqlite3.Database(dbPath, (err) => {
     if (err) console.error('Database connection error:', err);
     else console.log('Connected to SQLite database');
 });
@@ -56,6 +58,13 @@ db.serialize(() => {
             created_at TEXT NOT NULL
         )
     `);
+    db.run(`
+        CREATE TABLE IF NOT EXISTS sessions (
+            sid TEXT PRIMARY KEY,
+            expires INTEGER,
+            data TEXT
+        )
+    `);
 });
 
 // Multer setup for file uploads
@@ -71,15 +80,26 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
+// Session store
+const sessionStore = new SequelizeStore({
+    db: {
+        dialect: 'sqlite',
+        storage: dbPath
+    },
+    tableName: 'sessions'
+});
+sessionStore.sync();
+
 // Middleware
 app.use(express.static('public'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(session({
     secret: process.env.SESSION_SECRET || 'your-secret-key',
+    store: sessionStore,
     resave: false,
     saveUninitialized: false,
-    cookie: { secure: process.env.NODE_ENV === 'production' }
+    cookie: { secure: process.env.NODE_ENV === 'production', maxAge: 24 * 60 * 60 * 1000 }
 }));
 app.use((req, res, next) => {
     res.header('Cache-Control', 'no-cache, no-store, must-revalidate');
@@ -91,6 +111,7 @@ app.use((req, res, next) => {
 // Authentication middleware
 function ensureAuthenticated(req, res, next) {
     if (req.session.userId) return next();
+    console.log('Unauthorized access attempt:', req.path);
     res.status(401).json({ success: false, message: 'Unauthorized' });
 }
 
@@ -109,16 +130,29 @@ app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'public', 'log
 // Login
 app.post('/api/login', (req, res) => {
     const { username, password } = req.body;
+    console.log('Login attempt:', { username });
     db.get('SELECT * FROM users WHERE username = ?', [username], async (err, user) => {
         if (err) {
-            console.error('Login error:', err);
+            console.error('Login database error:', err);
             return res.json({ success: false, message: 'Server error' });
         }
-        if (!user || !(await bcrypt.compare(password, user.password))) {
+        if (!user) {
+            console.log('User not found:', username);
             return res.json({ success: false, message: 'Invalid credentials' });
         }
-        req.session.userId = user.id;
-        res.json({ success: true });
+        try {
+            const match = await bcrypt.compare(password, user.password);
+            if (!match) {
+                console.log('Invalid password for user:', username);
+                return res.json({ success: false, message: 'Invalid credentials' });
+            }
+            req.session.userId = user.id;
+            console.log('Login successful:', username);
+            res.json({ success: true });
+        } catch (err) {
+            console.error('Bcrypt error:', err);
+            res.json({ success: false, message: 'Server error' });
+        }
     });
 });
 
@@ -135,15 +169,27 @@ app.post('/api/logout', (req, res) => {
 
 // Current user
 app.get('/api/current-user', (req, res) => {
-    if (!req.session.userId) return res.json(null);
+    if (!req.session.userId) {
+        console.log('No session userId');
+        return res.json(null);
+    }
     db.get('SELECT id, username, role, permissions FROM users WHERE id = ?', [req.session.userId], (err, user) => {
         if (err) {
-            console.error('Current user error:', err);
+            console.error('Current user database error:', err);
             return res.json(null);
         }
-        if (!user) return res.json(null);
-        user.permissions = JSON.parse(user.permissions || '["tasks"]');
-        res.json(user);
+        if (!user) {
+            console.log('User not found for session userId:', req.session.userId);
+            return res.json(null);
+        }
+        try {
+            user.permissions = JSON.parse(user.permissions || '["tasks"]');
+            console.log('Current user:', user);
+            res.json(user);
+        } catch (err) {
+            console.error('Permissions parse error:', err);
+            res.json(null);
+        }
     });
 });
 
@@ -155,7 +201,12 @@ app.get('/api/users', ensureAuthenticated, (req, res) => {
             return res.json({ success: false, message: 'Server error' });
         }
         users.forEach(user => {
-            user.permissions = JSON.parse(user.permissions || '["tasks"]');
+            try {
+                user.permissions = JSON.parse(user.permissions || '["tasks"]');
+            } catch (err) {
+                console.error('Permissions parse error for user:', user.username, err);
+                user.permissions = ['tasks'];
+            }
         });
         res.json(users);
     });
@@ -236,7 +287,7 @@ app.post('/api/tasks', ensureAuthenticated, upload.single('image'), (req, res) =
     const image = req.file ? `/uploads/${req.file.filename}` : null;
     const today = new Date().toISOString().split('T')[0];
     if (!title || !type || !urgency) {
-        console.error('Missing required fields');
+        console.error('Missing required fields:', { title, type, urgency });
         return res.json({ success: false, message: 'Title, type, and urgency are required' });
     }
     if (!due_date && (!season || season === 'all') && due_date !== today) {
@@ -290,6 +341,7 @@ app.post('/api/tasks/:id/complete', ensureAuthenticated, upload.single('completi
     const { completion_note } = req.body;
     const completion_image = req.file ? `/uploads/${req.file.filename}` : null;
     if (!completion_image && !completion_note) {
+        console.error('Completion validation failed:', { completion_image, completion_note });
         return res.json({ success: false, message: 'Image or note required for completion' });
     }
     db.run(
@@ -335,6 +387,28 @@ app.post('/api/tasks/:id/archive', ensureAuthenticated, (req, res) => {
     );
 });
 
+app.post('/api/tasks/:id/unarchive', ensureAuthenticated, (req, res) => {
+    db.run(
+        `UPDATE tasks SET archived = ? WHERE id = ?`,
+        [false, req.params.id],
+        function(err) {
+            if (err) {
+                console.error('Task unarchive error:', err);
+                return res.json({ success: false, message: 'Failed to unarchive task' });
+            }
+            if (this.changes === 0) {
+                return res.json({ success: false, message: 'Task not found' });
+            }
+            wss.clients.forEach(client => {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.send(JSON.stringify({ type: 'updated_task', id: req.params.id }));
+                }
+            });
+            res.json({ success: true });
+        }
+    );
+});
+
 app.delete('/api/tasks/:id', ensureAuthenticated, (req, res) => {
     db.run('DELETE FROM tasks WHERE id = ?', [req.params.id], function(err) {
         if (err) {
@@ -357,6 +431,7 @@ app.post('/api/tasks/from-issue', ensureAuthenticated, upload.single('image'), (
     const { title, type, description, due_date, urgency, allocated_to, season, recurrence, issue_id } = req.body;
     const image = req.file ? `/uploads/${req.file.filename}` : null;
     if (!title || !type || !urgency) {
+        console.error('Missing required fields for task from issue:', { title, type, urgency });
         return res.json({ success: false, message: 'Title, type, and urgency are required' });
     }
     db.run(
@@ -397,6 +472,7 @@ app.post('/api/issues', ensureAuthenticated, upload.single('image'), (req, res) 
     const image = req.file ? `/uploads/${req.file.filename}` : null;
     const created_at = new Date().toISOString();
     if (!location || !urgency || !raised_by) {
+        console.error('Missing required fields for issue:', { location, urgency, raised_by });
         return res.json({ success: false, message: 'Location, urgency, and raised_by are required' });
     }
     db.run(
@@ -406,16 +482,15 @@ app.post('/api/issues', ensureAuthenticated, upload.single('image'), (req, res) 
         function(err) {
             if (err) {
                 console.error('Issue creation error:', err);
-                return res.json({ success: false, message: 'Failed to add issue' });
-            }
-            wss.clients.forEach(client => {
-                if (client.readyState === WebSocket.OPEN) {
-                    client.send(JSON.stringify({ type: 'new_issue', id: this.lastID }));
-                }
-            });
-            res.json({ success: true });
+            return res.json({ success: false, message: 'Failed to add issue' });
         }
-    );
+        wss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+                client.send(JSON.stringify({ type: 'new_issue', id: this.lastID }));
+            }
+        });
+        res.json({ success: true });
+    });
 });
 
 app.delete('/api/issues/:id', ensureAuthenticated, (req, res) => {
