@@ -47,9 +47,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 const res = await fetch('/api/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, password })
+                    body: JSON.stringify({ username, password }),
+                    credentials: 'include'
                 });
                 const data = await res.json();
+                console.log('Login response:', data);
                 if (data.success) {
                     window.location.href = '/';
                 } else {
@@ -66,9 +68,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Navbar setup
     if (navbar) {
-        fetch('/api/current-user')
+        fetch('/api/current-user', { credentials: 'include' })
             .then(res => res.json())
             .then(user => {
+                console.log('Current user response:', user);
                 if (user) {
                     const permissions = user.permissions || ['tasks'];
                     navbar.innerHTML = `
@@ -80,24 +83,29 @@ document.addEventListener('DOMContentLoaded', () => {
                         <button id="logout-btn">Logout</button>
                     `;
                     const logoutBtn = document.getElementById('logout-btn');
-                    logoutBtn.addEventListener('click', async () => {
-                        try {
-                            const res = await fetch('/api/logout', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                credentials: 'include'
-                            });
-                            const data = await res.json();
-                            if (data.success) {
-                                window.location.href = '/login';
-                            } else {
-                                console.error('Logout failed:', data.message);
+                    if (logoutBtn) {
+                        logoutBtn.addEventListener('click', async () => {
+                            try {
+                                const res = await fetch('/api/logout', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    credentials: 'include'
+                                });
+                                const data = await res.json();
+                                if (data.success) {
+                                    window.location.href = '/login';
+                                } else {
+                                    console.error('Logout failed:', data.message);
+                                    showToast('Logout failed');
+                                }
+                            } catch (err) {
+                                console.error('Logout error:', err);
+                                showToast('Logout error');
                             }
-                        } catch (err) {
-                            console.error('Logout error:', err);
-                        }
-                    });
+                        });
+                    }
                 } else {
+                    console.log('Redirecting to login: no user');
                     window.location.href = '/login';
                 }
             })
@@ -119,22 +127,27 @@ document.addEventListener('DOMContentLoaded', () => {
     // WebSocket setup
     let ws;
     function connectWebSocket() {
-        ws = new WebSocket(`wss://${window.location.host}/`);
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        ws = new WebSocket(`${wsProtocol}://${window.location.host}/`);
         ws.onopen = () => console.log('WebSocket connected');
         ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            console.log('WebSocket message:', data);
-            if ((data.type === 'new_task' || data.type === 'updated_task') && tasksContainer && window.location.pathname === '/') {
-                loadTasks(document.querySelector('.filter-btn.active')?.dataset.type || 'maintenance');
-            }
-            if ((data.type === 'new_task' || data.type === 'updated_task') && adminTasksContainer && window.location.pathname === '/admin') {
-                loadAdminTasks();
-            }
-            if ((data.type === 'new_task' || data.type === 'updated_task') && archiveTasksContainer && window.location.pathname === '/archive') {
-                loadArchiveTasks();
-            }
-            if ((data.type === 'new_issue' || data.type === 'updated_issue') && issuesContainer && window.location.pathname === '/issues') {
-                loadIssues();
+            try {
+                const data = JSON.parse(event.data);
+                console.log('WebSocket message:', data);
+                if ((data.type === 'new_task' || data.type === 'updated_task') && tasksContainer && window.location.pathname === '/') {
+                    loadTasks(document.querySelector('.filter-btn.active')?.dataset.type || 'maintenance');
+                }
+                if ((data.type === 'new_task' || data.type === 'updated_task') && adminTasksContainer && window.location.pathname === '/admin') {
+                    loadAdminTasks();
+                }
+                if ((data.type === 'new_task' || data.type === 'updated_task') && archiveTasksContainer && window.location.pathname === '/archive') {
+                    loadArchiveTasks();
+                }
+                if ((data.type === 'new_issue' || data.type === 'updated_issue') && issuesContainer && window.location.pathname === '/issues') {
+                    loadIssues();
+                }
+            } catch (err) {
+                console.error('WebSocket message parse error:', err);
             }
         };
         ws.onclose = () => {
@@ -153,18 +166,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const scheduledAllocatedTo = document.getElementById('allocated-to');
         const editAllocatedToSelect = document.getElementById('edit-allocated-to');
         const taskFromIssueAllocatedTo = taskFromIssueForm?.querySelector('select[name="allocated_to"]');
-        fetch('/api/users')
+        fetch('/api/users', { credentials: 'include' })
             .then(res => res.json())
             .then(users => {
                 const options = `<option value="">None</option>${users.map(user => `<option value="${user.username}">${user.username}</option>`).join('')}`;
-                dueTodayAllocatedTo.innerHTML = options;
-                scheduledAllocatedTo.innerHTML = options;
-                editAllocatedToSelect.innerHTML = options;
+                if (dueTodayAllocatedTo) dueTodayAllocatedTo.innerHTML = options;
+                if (scheduledAllocatedTo) scheduledAllocatedTo.innerHTML = options;
+                if (editAllocatedToSelect) editAllocatedToSelect.innerHTML = options;
                 if (taskFromIssueAllocatedTo) taskFromIssueAllocatedTo.innerHTML = options;
             })
             .catch(err => console.error('Fetch users error:', err));
 
-        const seasonButtons = document.querySelectorAll('.scheduled-task-form .season-btn');
+        const seasonButtons = document.querySelectorAll('#scheduled-task-form .season-btn');
         const seasonInput = document.getElementById('season-input');
         seasonButtons.forEach(btn => {
             btn.addEventListener('click', () => {
@@ -174,18 +187,20 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
 
-        const editSeasonButtons = editTaskForm.querySelectorAll('.season-btn');
+        const editSeasonButtons = editTaskForm?.querySelectorAll('.season-btn');
         const editSeasonInput = document.getElementById('edit-season-input');
-        editSeasonButtons.forEach(btn => {
-            btn.addEventListener('click', () => {
-                editSeasonButtons.forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                editSeasonInput.value = btn.dataset.season;
+        if (editSeasonButtons) {
+            editSeasonButtons.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    editSeasonButtons.forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    editSeasonInput.value = btn.dataset.season;
+                });
             });
-        });
+        }
 
         const taskFromIssueSeasonButtons = taskFromIssueForm?.querySelectorAll('.season-btn');
-        const taskFromIssueSeasonInput = taskFromIssueForm?.querySelector('#task-from-issue-season-input');
+        const taskFromIssueSeasonInput = document.getElementById('task-from-issue-season-input');
         if (taskFromIssueSeasonButtons && taskFromIssueSeasonInput) {
             taskFromIssueSeasonButtons.forEach(btn => {
                 btn.addEventListener('click', () => {
@@ -207,7 +222,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 try {
                     const res = await fetch('/api/tasks', {
                         method: 'POST',
-                        body: formData
+                        body: formData,
+                        credentials: 'include'
                     });
                     const data = await res.json();
                     if (data.success) {
@@ -241,7 +257,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 try {
                     const res = await fetch('/api/tasks', {
                         method: 'POST',
-                        body: formData
+                        body: formData,
+                        credentials: 'include'
                     });
                     const data = await res.json();
                     if (data.success) {
@@ -263,54 +280,61 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
-        editTaskForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const taskId = editTaskForm.querySelector('input[name="id"]').value;
-            const dueDate = document.getElementById('edit-due_date').value;
-            const season = editSeasonInput.value;
-            if (!dueDate && (!season || season === 'all')) {
-                document.getElementById('edit-form-error').style.display = 'block';
-                document.getElementById('edit-form-error').textContent = 'Either a due date or a specific season is required';
-                return;
-            }
-            const formData = new FormData(editTaskForm);
-            formData.append('existing_image', editTaskForm.dataset.existingImage || '');
-            try {
-                const res = await fetch(`/api/tasks/${taskId}`, {
-                    method: 'PUT',
-                    body: formData
-                });
-                const data = await res.json();
-                if (data.success) {
-                    editTaskModal.style.display = 'none';
-                    editTaskForm.reset();
-                    editSeasonButtons.forEach(b => b.classList.remove('active'));
-                    editSeasonInput.value = 'all';
-                    document.getElementById('edit-form-error').style.display = 'none';
-                    showToast('Task updated successfully!');
-                    loadAdminTasks();
-                } else {
+        if (editTaskForm) {
+            editTaskForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const taskId = editTaskForm.querySelector('input[name="id"]').value;
+                const dueDate = document.getElementById('edit-due_date').value;
+                const season = editSeasonInput.value;
+                if (!dueDate && (!season || season === 'all')) {
                     document.getElementById('edit-form-error').style.display = 'block';
-                    document.getElementById('edit-form-error').textContent = data.message || 'Failed to update task';
+                    document.getElementById('edit-form-error').textContent = 'Either a due date or a specific season is required';
+                    return;
                 }
-            } catch (err) {
-                console.error('Task update error:', err);
-                document.getElementById('edit-form-error').style.display = 'block';
-                document.getElementById('edit-form-error').textContent = 'Server error';
-            }
-        });
+                const formData = new FormData(editTaskForm);
+                formData.append('existing_image', editTaskForm.dataset.existingImage || '');
+                try {
+                    const res = await fetch(`/api/tasks/${taskId}`, {
+                        method: 'PUT',
+                        body: formData,
+                        credentials: 'include'
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        editTaskModal.style.display = 'none';
+                        editTaskForm.reset();
+                        editSeasonButtons.forEach(b => b.classList.remove('active'));
+                        editSeasonInput.value = 'all';
+                        document.getElementById('edit-form-error').style.display = 'none';
+                        showToast('Task updated successfully!');
+                        loadAdminTasks();
+                    } else {
+                        document.getElementById('edit-form-error').style.display = 'block';
+                        document.getElementById('edit-form-error').textContent = data.message || 'Failed to update task';
+                    }
+                } catch (err) {
+                    console.error('Task update error:', err);
+                    document.getElementById('edit-form-error').style.display = 'block';
+                    document.getElementById('edit-form-error').textContent = 'Server error';
+                }
+            });
+        }
 
-        closeEditModal.addEventListener('click', () => {
-            editTaskModal.style.display = 'none';
-        });
-        window.addEventListener('click', (e) => {
-            if (e.target === editTaskModal) {
+        if (closeEditModal) {
+            closeEditModal.addEventListener('click', () => {
                 editTaskModal.style.display = 'none';
-            }
-        });
+            });
+        }
+        if (editTaskModal) {
+            window.addEventListener('click', (e) => {
+                if (e.target === editTaskModal) {
+                    editTaskModal.style.display = 'none';
+                }
+            });
+        }
 
         function loadAdminTasks() {
-            fetch('/api/tasks')
+            fetch('/api/tasks', { credentials: 'include' })
                 .then(res => res.json())
                 .then(tasks => {
                     const today = new Date().toISOString().split('T')[0];
@@ -318,9 +342,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     const completedContainer = document.querySelector('#completed .tasks');
                     const scheduledContainer = document.querySelector('#scheduled .tasks');
 
-                    dueTodayContainer.innerHTML = '';
-                    completedContainer.innerHTML = '';
-                    scheduledContainer.innerHTML = '';
+                    if (dueTodayContainer) dueTodayContainer.innerHTML = '';
+                    if (completedContainer) completedContainer.innerHTML = '';
+                    if (scheduledContainer) scheduledContainer.innerHTML = '';
 
                     // Filter tasks
                     const dueTodayTasks = tasks.filter(task => !task.archived && !task.completed && task.due_date === today);
@@ -413,18 +437,21 @@ document.addEventListener('DOMContentLoaded', () => {
             document.querySelectorAll('.complete-btn').forEach(btn => {
                 btn.addEventListener('click', () => {
                     const card = btn.closest('.admin-task-card');
-                    completeTaskModal.style.display = 'flex';
-                    completeTaskForm.querySelector('input[name="task_id"]').value = card.dataset.id;
+                    if (completeTaskModal) {
+                        completeTaskModal.style.display = 'flex';
+                        completeTaskForm.querySelector('input[name="task_id"]').value = card.dataset.id;
+                    }
                 });
             });
 
             document.querySelectorAll('.edit-btn').forEach(btn => {
                 btn.addEventListener('click', () => {
                     const card = btn.closest('.admin-task-card');
-                    fetch('/api/tasks')
+                    fetch('/api/tasks', { credentials: 'include' })
                         .then(res => res.json())
                         .then(tasks => {
                             const task = tasks.find(t => t.id == card.dataset.id);
+                            if (!task) return;
                             editTaskForm.querySelector('input[name="id"]').value = task.id;
                             editTaskForm.querySelector('input[name="title"]').value = task.title;
                             editTaskForm.querySelector('select[name="type"]').value = task.type;
@@ -449,7 +476,10 @@ document.addEventListener('DOMContentLoaded', () => {
             document.querySelectorAll('.archive-btn').forEach(btn => {
                 btn.addEventListener('click', () => {
                     const card = btn.closest('.admin-task-card');
-                    fetch(`/api/tasks/${card.dataset.id}/archive`, { method: 'POST' })
+                    fetch(`/api/tasks/${card.dataset.id}/archive`, {
+                        method: 'POST',
+                        credentials: 'include'
+                    })
                         .then(res => res.json())
                         .then(data => {
                             if (data.success) {
@@ -467,12 +497,15 @@ document.addEventListener('DOMContentLoaded', () => {
             document.querySelectorAll('.delete-btn').forEach(btn => {
                 btn.addEventListener('click', () => {
                     const card = btn.closest('.admin-task-card');
-                    fetch(`/api/tasks/${card.dataset.id}`, { method: 'DELETE' })
+                    fetch(`/api/tasks/${card.dataset.id}`, {
+                        method: 'DELETE',
+                        credentials: 'include'
+                    })
                         .then(res => res.json())
                         .then(data => {
                             if (data.success) {
                                 showToast('Task deleted successfully!');
-                                card.remove();
+                                loadAdminTasks();
                                 if (archiveTasksContainer && window.location.pathname === '/archive') {
                                     loadArchiveTasks();
                                 }
@@ -489,7 +522,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Archive page
     if (archiveTasksContainer && window.location.pathname === '/archive') {
         function loadArchiveTasks() {
-            fetch('/api/tasks')
+            fetch('/api/tasks', { credentials: 'include' })
                 .then(res => res.json())
                 .then(tasks => {
                     const tasksGrid = archiveTasksContainer.querySelector('.tasks');
@@ -531,12 +564,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     document.querySelectorAll('.unarchive-btn').forEach(btn => {
                         btn.addEventListener('click', () => {
                             const card = btn.closest('.admin-task-card');
-                            fetch(`/api/tasks/${card.dataset.id}/unarchive`, { method: 'POST' })
+                            fetch(`/api/tasks/${card.dataset.id}/unarchive`, {
+                                method: 'POST',
+                                credentials: 'include'
+                            })
                                 .then(res => res.json())
                                 .then(data => {
                                     if (data.success) {
                                         showToast('Task unarchived successfully!');
-                                        card.remove();
+                                        loadArchiveTasks();
                                     }
                                 })
                                 .catch(err => console.error('Unarchive task error:', err));
@@ -546,12 +582,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     document.querySelectorAll('.delete-btn').forEach(btn => {
                         btn.addEventListener('click', () => {
                             const card = btn.closest('.admin-task-card');
-                            fetch(`/api/tasks/${card.dataset.id}`, { method: 'DELETE' })
+                            fetch(`/api/tasks/${card.dataset.id}`, {
+                                method: 'DELETE',
+                                credentials: 'include'
+                            })
                                 .then(res => res.json())
                                 .then(data => {
                                     if (data.success) {
                                         showToast('Task deleted successfully!');
-                                        card.remove();
+                                        loadArchiveTasks();
                                     }
                                 })
                                 .catch(err => console.error('Delete task error:', err));
@@ -582,71 +621,80 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Staff page
     if (usersList && userForm && window.location.pathname === '/staff') {
-        addUserBtn.addEventListener('click', () => {
-            modalTitle.textContent = 'Add User';
-            userForm.reset();
-            userForm.querySelector('input[name="id"]').value = '';
-            userForm.querySelectorAll('input[name="permissions"]').forEach(checkbox => {
-                checkbox.checked = checkbox.value === 'tasks';
-            });
-            userModal.style.display = 'flex';
-        });
-
-        closeModal.addEventListener('click', () => {
-            userModal.style.display = 'none';
-        });
-
-        window.addEventListener('click', (e) => {
-            if (e.target === userModal) {
-                userModal.style.display = 'none';
-            }
-        });
-
-        userForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const id = userForm.querySelector('input[name="id"]').value;
-            const username = userForm.querySelector('input[name="username"]').value;
-            const password = userForm.querySelector('input[name="password"]').value;
-            const role = userForm.querySelector('select[name="role"]').value;
-            const permissions = Array.from(userForm.querySelectorAll('input[name="permissions"]:checked')).map(cb => cb.value);
-
-            if (!permissions.length) {
-                document.getElementById('modal-error').style.display = 'block';
-                document.getElementById('modal-error').textContent = 'At least one page access is required';
-                return;
-            }
-
-            const url = id ? `/api/users/${id}` : '/api/users';
-            const method = id ? 'PUT' : 'POST';
-            const body = { username, role, permissions };
-            if (password) body.password = password;
-
-            try {
-                const res = await fetch(url, {
-                    method,
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(body)
+        if (addUserBtn) {
+            addUserBtn.addEventListener('click', () => {
+                modalTitle.textContent = 'Add User';
+                userForm.reset();
+                userForm.querySelector('input[name="id"]').value = '';
+                userForm.querySelectorAll('input[name="permissions"]').forEach(checkbox => {
+                    checkbox.checked = checkbox.value === 'tasks';
                 });
-                const data = await res.json();
-                if (data.success) {
+                userModal.style.display = 'flex';
+            });
+        }
+
+        if (closeModal) {
+            closeModal.addEventListener('click', () => {
+                userModal.style.display = 'none';
+            });
+        }
+
+        if (userModal) {
+            window.addEventListener('click', (e) => {
+                if (e.target === userModal) {
                     userModal.style.display = 'none';
-                    userForm.reset();
-                    document.getElementById('modal-error').style.display = 'none';
-                    showToast(id ? 'User updated successfully!' : 'User created successfully!');
-                    loadUsers();
-                } else {
-                    document.getElementById('modal-error').style.display = 'block';
-                    document.getElementById('modal-error').textContent = data.message || 'Failed to save user';
                 }
-            } catch (err) {
-                console.error('User save error:', err);
-                document.getElementById('modal-error').style.display = 'block';
-                document.getElementById('modal-error').textContent = 'Server error';
-            }
-        });
+            });
+        }
+
+        if (userForm) {
+            userForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const id = userForm.querySelector('input[name="id"]').value;
+                const username = userForm.querySelector('input[name="username"]').value;
+                const password = userForm.querySelector('input[name="password"]').value;
+                const role = userForm.querySelector('select[name="role"]').value;
+                const permissions = Array.from(userForm.querySelectorAll('input[name="permissions"]:checked')).map(cb => cb.value);
+
+                if (!permissions.length) {
+                    document.getElementById('modal-error').style.display = 'block';
+                    document.getElementById('modal-error').textContent = 'At least one page access is required';
+                    return;
+                }
+
+                const url = id ? `/api/users/${id}` : '/api/users';
+                const method = id ? 'PUT' : 'POST';
+                const body = { username, role, permissions };
+                if (password) body.password = password;
+
+                try {
+                    const res = await fetch(url, {
+                        method,
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body),
+                        credentials: 'include'
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        userModal.style.display = 'none';
+                        userForm.reset();
+                        document.getElementById('modal-error').style.display = 'none';
+                        showToast(id ? 'User updated successfully!' : 'User created successfully!');
+                        loadUsers();
+                    } else {
+                        document.getElementById('modal-error').style.display = 'block';
+                        document.getElementById('modal-error').textContent = data.message || 'Failed to save user';
+                    }
+                } catch (err) {
+                    console.error('User save error:', err);
+                    document.getElementById('modal-error').style.display = 'block';
+                    document.getElementById('modal-error').textContent = 'Server error';
+                }
+            });
+        }
 
         function loadUsers() {
-            fetch('/api/users')
+            fetch('/api/users', { credentials: 'include' })
                 .then(res => res.json())
                 .then(users => {
                     usersList.innerHTML = '';
@@ -673,7 +721,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         btn.addEventListener('click', () => {
                             const card = btn.closest('.user-card');
                             const userId = parseInt(card.dataset.id);
-                            fetch('/api/users')
+                            fetch('/api/users', { credentials: 'include' })
                                 .then(res => res.json())
                                 .then(users => {
                                     const user = users.find(u => u.id === userId);
@@ -694,7 +742,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     document.querySelectorAll('.delete-btn').forEach(btn => {
                         btn.addEventListener('click', () => {
                             const card = btn.closest('.user-card');
-                            fetch(`/api/users/${card.dataset.id}`, { method: 'DELETE' })
+                            fetch(`/api/users/${card.dataset.id}`, {
+                                method: 'DELETE',
+                                credentials: 'include'
+                            })
                                 .then(res => res.json())
                                 .then(data => {
                                     if (data.success) {
@@ -714,16 +765,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Tasks page
     if (tasksContainer && window.location.pathname === '/') {
-        const filterButtons = document.querySelectorAll('.tasks');
         let currentUser = null;
-        fetch('/api/current-user')
+        fetch('/api/current-user', { credentials: 'include' })
             .then(res => res.json())
             .then(user => {
+                console.log('Tasks page current user:', user);
                 if (!user) {
+                    console.log('No user, redirecting to login');
                     window.location.href = '/login';
                     return;
                 }
                 currentUser = user;
+
+                const filterButtons = document.querySelectorAll('.filter-btn');
                 filterButtons.forEach(btn => {
                     btn.addEventListener('click', () => {
                         filterButtons.forEach(b => b.classList.remove('active'));
@@ -733,15 +787,26 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
 
                 const defaultType = window.innerWidth <= 600 ? 'maintenance' : 'all';
-                document.querySelector(`.filter-btn[data-type="${defaultType}"]`)?.classList.add('active');
-                loadTasks(defaultType);
+                const defaultBtn = document.querySelector(`.filter-btn[data-type="${defaultType}"]`);
+                if (defaultBtn) {
+                    defaultBtn.classList.add('active');
+                    loadTasks(defaultType);
+                }
 
                 // Raise issue button
                 if (raiseIssueBtn) {
                     raiseIssueBtn.addEventListener('click', () => {
-                        issueForm.querySelector('input[name="raised_by"]').value = currentUser.username;
-                        issueModal.style.display = 'flex';
+                        console.log('Raise issue button clicked');
+                        if (issueForm && issueModal) {
+                            issueForm.querySelector('input[name="raised_by"]').value = currentUser.username;
+                            issueModal.style.display = 'flex';
+                        } else {
+                            console.error('Issue modal or form not found');
+                            showToast('Error: Issue form not available');
+                        }
                     });
+                } else {
+                    console.error('Raise issue button not found');
                 }
 
                 if (closeIssueModal) {
@@ -761,11 +826,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (issueForm) {
                     issueForm.addEventListener('submit', async (e) => {
                         e.preventDefault();
+                        console.log('Submitting issue form');
                         const formData = new FormData(issueForm);
                         try {
                             const res = await fetch('/api/issues', {
                                 method: 'POST',
-                                body: formData
+                                body: formData,
+                                credentials: 'include'
                             });
                             const data = await res.json();
                             if (data.success) {
@@ -797,12 +864,14 @@ document.addEventListener('DOMContentLoaded', () => {
                         const completionNote = formData.get('completion_note');
                         if (!completionImage && !completionNote) {
                             document.getElementById('complete-form-error').style.display = 'block';
+                            document.getElementById('complete-form-error').textContent = 'Image or note required';
                             return;
                         }
                         try {
                             const res = await fetch(`/api/tasks/${taskId}/complete`, {
                                 method: 'POST',
-                                body: formData
+                                body: formData,
+                                credentials: 'include'
                             });
                             const data = await res.json();
                             if (data.success) {
@@ -843,7 +912,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
         function loadTasks(type) {
-            fetch('/api/tasks')
+            fetch('/api/tasks', { credentials: 'include' })
                 .then(res => res.json())
                 .then(tasks => {
                     const tasksGrid = tasksContainer.querySelector('.tasks');
@@ -908,8 +977,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     document.querySelectorAll('.complete-btn').forEach(btn => {
                         btn.addEventListener('click', () => {
                             const card = btn.closest('.task-card');
-                            completeTaskModal.style.display = 'flex';
-                            completeTaskForm.querySelector('input[name="task_id"]').value = card.dataset.id;
+                            if (completeTaskModal) {
+                                completeTaskModal.style.display = 'flex';
+                                completeTaskForm.querySelector('input[name="task_id"]').value = card.dataset.id;
+                            }
                         });
                     });
 
@@ -919,7 +990,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             modal.className = 'image-modal';
                             modal.innerHTML = `
                                 <span class="close">×</span>
-                                <img src="${img.dataset.src}" alt="Full-size Task Image">
+                                <img src="${img.dataset.src}" alt="Full-size Image">
                             `;
                             document.body.appendChild(modal);
                             modal.querySelector('.close').addEventListener('click', () => modal.remove());
@@ -936,7 +1007,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Issues page
     if (issuesContainer && window.location.pathname === '/issues') {
         function loadIssues() {
-            fetch('/api/issues')
+            fetch('/api/issues', { credentials: 'include' })
                 .then(res => res.json())
                 .then(issues => {
                     const issuesGrid = issuesContainer.querySelector('.tasks');
@@ -967,16 +1038,18 @@ document.addEventListener('DOMContentLoaded', () => {
                     document.querySelectorAll('.create-task-btn').forEach(btn => {
                         btn.addEventListener('click', () => {
                             const card = btn.closest('.issue-card');
-                            fetch('/api/issues')
+                            fetch('/api/issues', { credentials: 'include' })
                                 .then(res => res.json())
                                 .then(issues => {
                                     const issue = issues.find(i => i.id == parseInt(card.dataset.id));
-                                    taskFromIssueForm.querySelector('input[name="issue_id"]').value = issue.id;
-                                    taskFromIssueForm.querySelector('input[name="title"]').value = `Issue: ${issue.location}`;
-                                    taskFromIssueForm.querySelector('textarea[name="description"]').value = issue.description || '';
-                                    taskFromIssueForm.querySelector('select[name="urgency"]').value = issue.urgency;
-                                    taskFromIssueForm.dataset.existingImage = issue.image || '';
-                                    taskFromIssueModal.style.display = 'flex';
+                                    if (taskFromIssueForm) {
+                                        taskFromIssueForm.querySelector('input[name="issue_id"]').value = issue.id;
+                                        taskFromIssueForm.querySelector('input[name="title"]').value = `Issue: ${issue.location}`;
+                                        taskFromIssueForm.querySelector('textarea[name="description"]').value = issue.description || '';
+                                        taskFromIssueForm.querySelector('select[name="urgency"]').value = issue.urgency;
+                                        taskFromIssueForm.dataset.existingImage = issue.image || '';
+                                        taskFromIssueModal.style.display = 'flex';
+                                    }
                                 })
                                 .catch(err => console.error('Fetch issue error:', err));
                         });
@@ -985,7 +1058,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     document.querySelectorAll('.delete-btn').forEach(btn => {
                         btn.addEventListener('click', () => {
                             const card = btn.closest('.issue-card');
-                            fetch(`/api/issues/${card.dataset.id}`, { method: 'DELETE' })
+                            fetch(`/api/issues/${card.dataset.id}`, {
+                                method: 'DELETE',
+                                credentials: 'include'
+                            })
                                 .then(res => res.json())
                                 .then(data => {
                                     if (data.success) {
@@ -1002,15 +1078,13 @@ document.addEventListener('DOMContentLoaded', () => {
                             const modal = document.createElement('div');
                             modal.className = 'image-modal';
                             modal.innerHTML = `
-                                <span class="modal-close">×</span>
-                                <img src="${img.dataset.src}" alt="Full-size Issue Image">
+                                <span class="close">×</span>
+                                <img src="${img.dataset.src}" alt="Full-size Image">
                             `;
                             document.body.appendChild(modal);
                             modal.querySelector('.close').addEventListener('click', () => modal.remove());
                             modal.addEventListener('click', (e) => {
-                                if (e.target === modal) {
-                                    modal.remove();
-                                }
+                                if (e.target === modal) modal.remove();
                             });
                         });
                     });
@@ -1019,9 +1093,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (taskFromIssueModal) {
-            closeTaskFromIssueModal.addEventListener('click', () => {
-                taskFromIssueModal.style.display = 'none';
-            });
+            if (closeTaskFromIssueModal) {
+                closeTaskFromIssueModal.addEventListener('click', () => {
+                    taskFromIssueModal.style.display = 'none';
+                });
+            }
 
             window.addEventListener('click', (e) => {
                 if (e.target === taskFromIssueModal) {
@@ -1029,32 +1105,35 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
 
-            taskFromIssueForm.addEventListener('submit', async (e) => {
-                e.preventDefault();
-                const formData = new FormData(taskFromIssueForm);
-                formData.append('existing_image', taskFromIssueForm.dataset.existingImage || '');
-                try {
-                    const res = await fetch('/api/tasks/from-issue', {
-                        method: 'POST',
-                        body: formData
-                    });
-                    const data = await res.json();
-                    if (data.success) {
-                        taskFromIssueModal.style.display = 'none';
-                        taskFromIssueForm.reset();
-                        document.getElementById('task-from-issue-form-error').style.display = 'none';
-                        showToast('Task created from issue successfully!');
-                        loadIssues();
-                    } else {
-                        document.getElementById('task-from-issue-error').style.display = 'block';
-                        document.getElementById('task-from-issue-form-error').textContent = data.message || 'Failed to create task';
+            if (taskFromIssueForm) {
+                taskFromIssueForm.addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    const formData = new FormData(taskFromIssueForm);
+                    formData.append('existing_image', taskFromIssueForm.dataset.existingImage || '');
+                    try {
+                        const res = await fetch('/api/tasks/from-issue', {
+                            method: 'POST',
+                            body: formData,
+                            credentials: 'include'
+                        });
+                        const data = await res.json();
+                        if (data.success) {
+                            taskFromIssueModal.style.display = 'none';
+                            taskFromIssueForm.reset();
+                            document.getElementById('task-from-issue-form-error').style.display = 'none';
+                            showToast('Task created from issue successfully!');
+                            loadIssues();
+                        } else {
+                            document.getElementById('task-from-issue-form-error').style.display = 'block';
+                            document.getElementById('task-from-issue-form-error').textContent = data.message || 'Failed to create task';
+                        }
+                    } catch (err) {
+                        console.error('Task from issue error:', err);
+                        document.getElementById('task-from-issue-form-error').style.display = 'block';
+                        document.getElementById('task-from-issue-form-error').textContent = 'Server error';
                     }
-                } catch (err) {
-                    console.error('Task from issue error:', err);
-                    document.getElementById('task-from-issue-error').style.display = 'block';
-                    document arkadaElementById('form-error').textContent = 'Server error';
-                }
-            });
+                });
+            }
         }
 
         loadIssues();
