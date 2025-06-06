@@ -15,10 +15,11 @@ const port = process.env.PORT || 10000;
 // Database setup
 const dbPath = process.env.NODE_ENV === 'production' ? '/opt/render/project/src/database.db' : './database.db';
 const db = new sqlite3.Database(dbPath, (err) => {
-    if (err) console.error('Database connection error:', err);
+    if (err) console.error('Database connection error:', err.message);
     else console.log('Connected to SQLite database');
 });
 
+// Database migration and seeding
 db.serialize(() => {
     // Create tables
     db.run(`
@@ -26,10 +27,34 @@ db.serialize(() => {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
             password TEXT NOT NULL,
-            role TEXT NOT NULL,
-            permissions TEXT DEFAULT '["tasks"]'
+            role TEXT NOT NULL
         )
     `);
+
+    // Add permissions column if it doesn't exist
+    db.get("PRAGMA table_info(users)", (err, columns) => {
+        if (err) {
+            console.error('Error checking users table schema:', err.message);
+            return;
+        }
+        const hasPermissions = columns.some(col => col.name === 'permissions');
+        if (!hasPermissions) {
+            console.log('Adding permissions column to users table...');
+            db.run(`
+                ALTER TABLE users
+                ADD COLUMN permissions TEXT DEFAULT '["tasks"]'
+            `, (err) => {
+                if (err) {
+                    console.error('Error adding permissions column:', err.message);
+                } else {
+                    console.log('Permissions column added successfully');
+                }
+            });
+        } else {
+            console.log('Permissions column already exists');
+        }
+    });
+
     db.run(`
         CREATE TABLE IF NOT EXISTS tasks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -69,33 +94,35 @@ db.serialize(() => {
     `);
 
     // Seed default admin user if no users exist
-    db.get('SELECT COUNT(*) as count FROM users', [], async (err, row) => {
-        if (err) {
-            console.error('Error checking users count:', err);
-            return;
-        }
-        if (row.count === 0) {
-            console.log('No users found, seeding default admin user...');
-            try {
-                const hashedPassword = await bcrypt.hash('admin123', 10);
-                db.run(
-                    'INSERT INTO users (username, password, role, permissions) VALUES (?, ?, ?, ?)',
-                    ['admin', hashedPassword, 'admin', '["tasks","admin","archive","staff","issues"]'],
-                    (err) => {
-                        if (err) {
-                            console.error('Error seeding admin user:', err);
-                        } else {
-                            console.log('Default admin user created: username=admin, password=admin123');
-                        }
-                    }
-                );
-            } catch (err) {
-                console.error('Error hashing password for admin user:', err);
+    setTimeout(() => { // Delay to ensure ALTER TABLE completes
+        db.get('SELECT COUNT(*) as count FROM users', [], async (err, row) => {
+            if (err) {
+                console.error('Error checking users count:', err.message);
+                return;
             }
-        } else {
-            console.log('Users table already contains data, skipping seeding.');
-        }
-    });
+            if (row.count === 0) {
+                console.log('No users found, seeding default admin user...');
+                try {
+                    const hashedPassword = await bcrypt.hash('admin123', 10);
+                    db.run(
+                        'INSERT INTO users (username, password, role, permissions) VALUES (?, ?, ?, ?)',
+                        ['admin', hashedPassword, 'admin', '["tasks","admin","archive","staff","issues"]'],
+                        (err) => {
+                            if (err) {
+                                console.error('Error seeding admin user:', err.message);
+                            } else {
+                                console.log('Default admin user created: username=admin, password=admin123');
+                            }
+                        }
+                    );
+                } catch (err) {
+                    console.error('Error hashing password for admin user:', err.message);
+                }
+            } else {
+                console.log('Users table already contains data, skipping seeding.');
+            }
+        });
+    }, 1000); // 1-second delay
 });
 
 // Multer setup
@@ -162,7 +189,7 @@ app.post('/api/login', (req, res) => {
     console.log('Login attempt:', { username });
     db.get('SELECT * FROM users WHERE username = ?', [username], async (err, user) => {
         if (err) {
-            console.error('Login database error:', err);
+            console.error('Login database error:', err.message);
             return res.json({ success: false, message: 'Server error' });
         }
         if (!user) {
@@ -179,7 +206,7 @@ app.post('/api/login', (req, res) => {
             console.log('Login successful:', username);
             res.json({ success: true });
         } catch (err) {
-            console.error('Bcrypt error:', err);
+            console.error('Bcrypt error:', err.message);
             res.json({ success: false, message: 'Server error' });
         }
     });
@@ -189,7 +216,7 @@ app.post('/api/login', (req, res) => {
 app.post('/api/logout', (req, res) => {
     req.session.destroy(err => {
         if (err) {
-            console.error('Logout error:', err);
+            console.error('Logout error:', err.message);
             return res.json({ success: false, message: 'Logout failed' });
         }
         res.json({ success: true });
@@ -204,7 +231,7 @@ app.get('/api/current-user', (req, res) => {
     }
     db.get('SELECT id, username, role, permissions FROM users WHERE id = ?', [req.session.userId], (err, user) => {
         if (err) {
-            console.error('Current user database error:', err);
+            console.error('Current user database error:', err.message);
             return res.json(null);
         }
         if (!user) {
@@ -216,7 +243,7 @@ app.get('/api/current-user', (req, res) => {
             console.log('Current user:', user);
             res.json(user);
         } catch (err) {
-            console.error('Permissions parse error:', err);
+            console.error('Permissions parse error:', err.message);
             res.json(null);
         }
     });
@@ -224,20 +251,11 @@ app.get('/api/current-user', (req, res) => {
 
 // Users
 app.get('/api/users', ensureAuthenticated, (req, res) => {
-    db.all('SELECT id, username, role, permissions FROM users', [], (err, users) => {
+    db.all('SELECT id, username, role, permissions FROM users', [], async (err, users) => {
         if (err) {
-            console.error('Users fetch error:', err);
-            return res.json({ success: false, message: 'Server error' });
+            console.error('users error:', err.message);
+            return res.json(users.message);
         }
-        users.forEach(user => {
-            try {
-                user.permissions = JSON.parse(user.permissions || '["tasks"]');
-            } catch (err) {
-                console.error('Permissions parse error for user:', user.username, err);
-                user.permissions = ['tasks'];
-            }
-        });
-        res.json(users);
     });
 });
 
