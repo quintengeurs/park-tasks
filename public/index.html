@@ -3,60 +3,64 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Park Tasks</title>
-    <link rel="stylesheet" href="/css/styles.css">
+    <title>Seasonal Tasks</title>
+    <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
-    <header>
-        <h1>Park Tasks</h1>
-        <nav id="navbar">
-            <!-- Dynamically populated by script.js -->
-        </nav>
-        <div class="header-buttons">
-            <button id="raiseIssueBtn">Raise an Issue</button>
-            <% if (user && ['Admin', 'Operations Manager', 'Area Manager North', 'Area Manager South', 'Head Gardeners', 'Keepers'].includes(user.role) && (user.role !== 'Keepers' || user.rospa_trained)) { %>
-                <button id="recordInspectionBtn">Record Inspection/Induction</button>
-            <% } %>
-        </div>
-    </header>
-    <main>
-        <h2>Welcome, <%= user.username %></h2>
-        <div class="filters">
-            <button class="filter-btn" data-type="all">All</button>
+    <nav id="navbar" class="navbar"></nav>
+    <div class="container">
+        <h1>Tasks</h1>
+        <div class="filter-buttons">
+            <button class="filter-btn active" data-type="all">All</button>
             <button class="filter-btn" data-type="maintenance">Maintenance</button>
-            <button class="filter-btn" data-type="cleansing">Cleansing and Litter</button>
             <button class="filter-btn" data-type="planting">Planting</button>
-            <% if (user.role !== 'Admin') { %>
-                <button class="filter-btn" data-type="allocated">Allocated To Me</button>
-            <% } %>
+            <button class="filter-btn" data-type="harvesting">Harvesting</button>
+            <button class="filter-btn" data-type="allocated">Allocated to Me</button>
+            <button id="raise-issue-btn">Raise Issue</button>
         </div>
-        <div id="tasks">
+        <div id="tasks" class="task-list">
             <div class="tasks"></div>
         </div>
-    </main>
-    <div id="issueModal" class="modal">
+    </div>
+    <div id="issue-modal" class="modal" style="display: none;">
         <div class="modal-content">
-            <span class="close">×</span>
-            <h2>Raise an Issue</h2>
-            <form id="issueForm" enctype="multipart/form-data" action="/issues" method="POST">
-                <label>Title:</label>
-                <input type="text" name="title" required>
-                <label>Description:</label>
-                <textarea name="description" required></textarea>
-                <label>Location:</label>
-                <input type="text" name="location" required>
-                <label>Image:</label>
-                <input type="file" name="image" accept="image/*">
-                <label>Urgency:</label>
-                <select name="urgency" required>
-                    <option value="Low">Low</option>
-                    <option value="Medium">Medium</option>
-                    <option value="High">High</option>
+            <span id="close-issue-modal" class="close">×</span>
+            <h2>Raise Issue</h2>
+            <form id="issue-form">
+                <label for="issue-location">Location</label>
+                <input type="text" id="issue-location" name="location" required>
+                <label for="issue-urgency">Urgency</label>
+                <select id="issue-urgency" name="urgency" required>
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                    <option value="urgent">Urgent</option>
                 </select>
+                <label for="issue-description">Description</label>
+                <textarea id="issue-description" name="description"></textarea>
+                <label for="issue-image">Image</label>
+                <input type="file" id="issue-image" name="image" accept="image/*">
+                <input type="hidden" name="raised_by">
                 <button type="submit">Submit Issue</button>
             </form>
+            <p id="issue-form-error" style="color: red; display: none;"></p>
         </div>
     </div>
-    <script src="/js/script.js"></script>
+    <div id="complete-task-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <span id="close-complete-modal" class="close">×</span>
+            <h2>Complete Task</h2>
+            <form id="complete-task-form">
+                <label for="completion-image">Completion Image</label>
+                <input type="file" id="completion-image" name="completion_image" accept="image/*">
+                <label for="completion-note">Completion Note</label>
+                <textarea id="completion-note" name="completion_note" placeholder="Enter note or reason if task cannot be completed"></textarea>
+                <input type="hidden" name="task_id">
+                <button type="submit">Submit Completion</button>
+            </form>
+            <p id="complete-form-error" style="color: red; display: none;">Image or note required</p>
+        </div>
+    </div>
+    <script src="js/scripts.js"></script>
 </body>
 </html>
