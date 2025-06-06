@@ -1,584 +1,468 @@
 const express = require('express');
-const sqlite3 = require('sqlite3').verbose();
 const session = require('express-session');
 const SequelizeStore = require('connect-session-sequelize')(session.Store);
+const { Sequelize, DataTypes } = require('sequelize');
 const bcrypt = require('bcrypt');
-const WebSocket = require('ws');
 const multer = require('multer');
 const path = require('path');
-const fs = require('fs');
-const { Sequelize } = require('sequelize');
+const WebSocket = require('ws');
 
 const app = express();
 const port = process.env.PORT || 10000;
 
-// Database setup
-const dbPath = process.env.NODE_ENV === 'production' ? '/opt/render/project/src/database.db' : './database.db';
-const db = new sqlite3.Database(dbPath, (err) => {
-    if (err) console.error('Database connection error:', err.message);
-    else console.log('Connected to SQLite database');
-});
-
-// Database migration and seeding
-db.serialize(() => {
-    db.run(`
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL,
-            role TEXT NOT NULL
-        )
-    `);
-
-    db.all("PRAGMA table_info(users)", (err, columns) => {
-        if (err) {
-            console.error('Error checking users table schema:', err.message);
-            return;
-        }
-        const hasPermissions = columns.some(col => col.name === 'permissions');
-        if (!hasPermissions) {
-            console.log('Adding permissions column to users table...');
-            db.run(`
-                ALTER TABLE users
-                ADD COLUMN permissions TEXT DEFAULT '["tasks"]'
-            `, (err) => {
-                if (err) {
-                    console.error('Error adding permissions column:', err.message);
-                } else {
-                    console.log('Permissions column added successfully');
-                }
-            });
-        } else {
-            console.log('Permissions column already exists');
-        }
-    });
-
-    db.run(`
-        CREATE TABLE IF NOT EXISTS tasks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            type TEXT NOT NULL,
-            description TEXT,
-            due_date TEXT,
-            urgency TEXT NOT NULL,
-            allocated_to TEXT,
-            season TEXT DEFAULT 'all',
-            image TEXT,
-            completed BOOLEAN DEFAULT FALSE,
-            archived BOOLEAN DEFAULT FALSE,
-            recurrence TEXT,
-            original_task_id INTEGER,
-            completion_image TEXT,
-            completion_note TEXT
-        )
-    `);
-    db.run(`
-        CREATE TABLE IF NOT EXISTS issues (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            location TEXT NOT NULL,
-            urgency TEXT NOT NULL,
-            image TEXT,
-            description TEXT,
-            raised_by TEXT NOT NULL,
-            created_at TEXT NOT NULL
-        )
-    `);
-    db.run(`
-        CREATE TABLE IF NOT EXISTS sessions (
-            sid TEXT PRIMARY KEY,
-            expires INTEGER,
-            data TEXT
-        )
-    `);
-
-    setTimeout(() => {
-        db.get('SELECT COUNT(*) as count FROM users', [], async (err, row) => {
-            if (err) {
-                console.error('Error checking users count:', err.message);
-                return;
-            }
-            if (row.count === 0) {
-                console.log('No users found, seeding default admin user...');
-                try {
-                    const hashedPassword = await bcrypt.hash('admin123', 10);
-                    db.run(
-                        'INSERT INTO users (username, password, role, permissions) VALUES (?, ?, ?, ?)',
-                        ['admin', hashedPassword, 'admin', '["tasks","admin","archive","staff","issues"]'],
-                        (err) => {
-                            if (err) {
-                                console.error('Error seeding admin user:', err.message);
-                            } else {
-                                console.log('Default admin user created: username=admin, password=admin123');
-                            }
-                        }
-                    );
-                } catch (err) {
-                    console.error('Error hashing password for admin user:', err.message);
-                }
-            } else {
-                console.log('Users table already contains data, skipping seeding.');
-            }
-        });
-    }, 1000);
-});
-
-// Multer setup
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        const dir = 'public/uploads/';
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-        cb(null, dir);
-    },
-    filename: (req, file, cb) => {
-        cb(null, Date.now() + path.extname(file.originalname));
-    }
-});
-const upload = multer({ storage });
-
-// Sequelize for session store
+// SQLite database setup
 const sequelize = new Sequelize({
     dialect: 'sqlite',
-    storage: dbPath,
-    logging: console.log // Enable SQL logging for debugging
+    storage: './database.sqlite',
+    logging: console.log
 });
-const sessionStore = new SequelizeStore({
+
+// Session store
+const store = new SequelizeStore({
     db: sequelize,
     tableName: 'Sessions',
     checkExpirationInterval: 15 * 60 * 1000, // Clean expired sessions every 15 minutes
-    expiration: 24 * 60 * 60 * 1000 // 24 hours
+    expiration: 24 * 60 * 60 * 1000 // Sessions expire after 24 hours
 });
-sessionStore.sync();
 
-// Middleware
-app.use(express.static('public'));
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
+// Session middleware
 app.use(session({
     secret: process.env.SESSION_SECRET || 'your-secret-key',
-    store: sessionStore,
+    store: store,
     resave: false,
     saveUninitialized: false,
     cookie: {
         secure: process.env.NODE_ENV === 'production',
-        httpOnly: true,
-        sameSite: 'lax', // Allow cookies for redirects
+        sameSite: process.env.NODE_ENV === 'production' ? 'lax' : 'lax',
         maxAge: 24 * 60 * 60 * 1000 // 24 hours
     }
 }));
-app.use((req, res, next) => {
-    console.log(`Request: ${req.method} ${req.path}, SessionID: ${req.sessionID}, UserID: ${req.session.userId || 'none'}`);
-    res.header('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.header('Pragma', 'no-cache');
-    res.header('Expires', '0');
-    next();
+
+// Models
+const User = sequelize.define('User', {
+    username: { type: DataTypes.STRING, allowNull: false, unique: true },
+    password: { type: DataTypes.STRING, allowNull: false },
+    role: { type: DataTypes.STRING, defaultValue: 'user' },
+    permissions: { type: DataTypes.JSON, defaultValue: ['tasks'] }
 });
 
-// Authentication middleware
-function ensureAuthenticated(req, res, next) {
-    if (req.session.userId) return next();
-    console.log('Unauthorized access attempt:', req.path);
-    res.status(401).json({ success: false, message: 'Unauthorized' });
-}
+const Task = sequelize.define('Task', {
+    title: { type: DataTypes.STRING, allowNull: false },
+    type: { type: DataTypes.STRING, allowNull: false },
+    description: { type: DataTypes.TEXT },
+    due_date: { type: DataTypes.DATE },
+    urgency: { type: DataTypes.STRING, defaultValue: 'medium' },
+    allocated_to: { type: DataTypes.STRING },
+    season: { type: DataTypes.STRING, defaultValue: 'all' },
+    recurrence: { type: DataTypes.STRING },
+    image: { type: DataTypes.STRING },
+    completion_note: { type: DataTypes.TEXT },
+    completion_image: { type: DataTypes.STRING },
+    completed: { type: DataTypes.BOOLEAN, defaultValue: false },
+    archived: { type: DataTypes.BOOLEAN, defaultValue: false }
+});
 
-// WebSocket server
-const server = app.listen(port, () => console.log(`Server running on port ${port}`));
-const wss = new WebSocket.Server({ server });
+const Issue = sequelize.define('Issue', {
+    location: { type: DataTypes.STRING, allowNull: false },
+    urgency: { type: DataTypes.STRING, allowNull: false },
+    description: { type: DataTypes.TEXT },
+    raised_by: { type: DataTypes.STRING, allowNull: false },
+    image: { type: DataTypes.STRING },
+    created_at: { type: DataTypes.DATE, defaultValue: Sequelize.NOW }
+});
+
+// Sync database
+sequelize.sync().then(async () => {
+    console.log('Connected to SQLite database');
+    store.sync();
+    try {
+        // Add permissions column if not exists
+        const [results] = await sequelize.query("PRAGMA table_info(Users)");
+        const hasPermissions = results.some(col => col.name === 'permissions');
+        if (!hasPermissions) {
+            console.log('Adding permissions column to users table...');
+            await sequelize.query('ALTER TABLE Users ADD COLUMN permissions JSON');
+            console.log('Permissions column added successfully');
+        }
+        // Seed default admin user
+        const users = await User.findAll();
+        if (users.length === 0) {
+            console.log('No users found, seeding default admin user...');
+            await User.create({
+                username: 'admin',
+                password: await bcrypt.hash('admin123', 10),
+                role: 'admin',
+                permissions: ['tasks', 'admin', 'archive', 'staff', 'issues']
+            });
+            console.log('Default admin user created: username=admin, password=admin123');
+        }
+    } catch (err) {
+        console.error('Database initialization error:', err);
+    }
+});
+
+// Middleware
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Multer setup for file uploads
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => cb(null, 'public/uploads/'),
+    filename: (req, file, cb) => cb(null, Date.now() + path.extname(file.originalname))
+});
+const upload = multer({ storage });
+
+// Authentication middleware
+const requireAuth = async (req, res, next) => {
+    console.log(`Request: ${req.method} ${req.path}, SessionID: ${req.sessionID}, UserID: ${req.session.userId || 'none'}`);
+    if (req.session.userId) {
+        const user = await User.findByPk(req.session.userId);
+        if (user) {
+            req.user = user;
+            return next();
+        }
+    }
+    console.log(`Unauthorized access attempt: ${req.path}`);
+    res.status(401).json({ redirect: '/login' });
+};
 
 // Routes
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-app.get('/admin', ensureAuthenticated, (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
-app.get('/archive', ensureAuthenticated, (req, res) => res.sendFile(path.join(__dirname, 'public', 'archive.html')));
-app.get('/staff', ensureAuthenticated, (req, res) => res.sendFile(path.join(__dirname, 'public', 'staff.html')));
-app.get('/issues', ensureAuthenticated, (req, res) => res.sendFile(path.join(__dirname, 'public', 'issues.html')));
-app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'public', 'login.html')));
-
-// Login
-app.post('/api/login', (req, res) => {
-    const { username, password } = req.body;
-    console.log('Login attempt:', { username });
-    db.get('SELECT * FROM users WHERE username = ?', [username], async (err, user) => {
-        if (err) {
-            console.error('Login database error:', err.message);
-            return res.json({ success: false, message: 'Server error' });
-        }
-        if (!user) {
-            console.log('User not found:', username);
-            return res.json({ success: false, message: 'Invalid credentials' });
-        }
-        try {
-            const match = await bcrypt.compare(password, user.password);
-            if (!match) {
-                console.log('Invalid password for user:', username);
-                return res.json({ success: false, message: 'Invalid credentials' });
-            }
-            req.session.userId = user.id;
-            console.log('Login successful:', username, 'SessionID:', req.sessionID, 'UserID:', req.session.userId);
-            req.session.save(err => {
-                if (err) {
-                    console.error('Session save error:', err.message);
-                    return res.json({ success: false, message: 'Server error' });
-                }
-                res.json({ success: true });
-            });
-        } catch (err) {
-            console.error('Bcrypt error:', err.message);
-            res.json({ success: false, message: 'Server error' });
-        }
+app.get('/api/current-user', requireAuth, (req, res) => {
+    res.json({
+        id: req.user.id,
+        username: req.user.username,
+        role: req.user.role,
+        permissions: req.user.permissions
     });
 });
 
-// Logout
+app.post('/api/login', async (req, res) => {
+    const { username, password } = req.body;
+    try {
+        const user = await User.findOne({ where: { username } });
+        if (user && await bcrypt.compare(password, user.password)) {
+            req.session.userId = user.id;
+            req.session.save(err => {
+                if (err) {
+                    console.error('Session save error:', err);
+                    return res.status(500).json({ success: false, message: 'Server error' });
+                }
+                console.log(`Login successful: ${username}, SessionID: ${req.sessionID}, UserID: ${user.id}`);
+                res.json({ success: true });
+            });
+        } else {
+            res.status(401).json({ success: false, message: 'Invalid credentials' });
+        }
+    } catch (err) {
+        console.error('Login error:', err);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
 app.post('/api/logout', (req, res) => {
     req.session.destroy(err => {
         if (err) {
-            console.error('Logout error:', err.message);
-            return res.json({ success: false, message: 'Logout failed' });
+            console.error('Logout error:', err);
+            return res.status(500).json({ success: false, message: 'Server error' });
         }
         res.json({ success: true });
     });
 });
 
-// Current user
-app.get('/api/current-user', (req, res) => {
-    if (!req.session.userId) {
-        console.log('No session userId for /api/current-user, SessionID:', req.sessionID);
-        return res.json(null);
+app.get('/api/users', requireAuth, async (req, res) => {
+    if (!req.user.permissions.includes('staff')) {
+        return res.status(403).json({ success: false, message: 'Unauthorized' });
     }
-    db.get('SELECT id, username, role, permissions FROM users WHERE id = ?', [req.session.userId], (err, user) => {
-        if (err) {
-            console.error('Current user database error:', err.message);
-            return res.json(null);
-        }
-        if (!user) {
-            console.log('User not found for session userId:', req.session.userId);
-            return res.json(null);
-        }
-        try {
-            user.permissions = JSON.parse(user.permissions || '["tasks"]');
-            console.log('Current user:', { id: user.id, username: user.username, role: user.role, permissions: user.permissions });
-            res.json(user);
-        } catch (err) {
-            console.error('Permissions parse error:', err.message);
-            res.json(null);
-        }
-    });
+    const users = await User.findAll({ attributes: ['id', 'username', 'role', 'permissions'] });
+    res.json(users);
 });
 
-// Users
-app.get('/api/users', ensureAuthenticated, (req, res) => {
-    db.all('SELECT id, username, role, permissions FROM users', [], (err, users) => {
-        if (err) {
-            console.error('Users fetch error:', err.message);
-            return res.json({ success: false, message: 'Server error' });
-        }
-        users.forEach(user => {
-            try {
-                user.permissions = JSON.parse(user.permissions || '["tasks"]');
-            } catch (err) {
-                console.error('Permissions parse error for user:', user.username, err.message);
-                user.permissions = ['tasks'];
-            }
-        });
-        res.json(users);
-    });
-});
-
-app.post('/api/users', ensureAuthenticated, async (req, res) => {
+app.post('/api/users', requireAuth, upload.none(), async (req, res) => {
+    if (!req.user.permissions.includes('staff')) {
+        return res.status(403).json({ success: false, message: 'Unauthorized' });
+    }
     const { username, password, role, permissions } = req.body;
-    if (!username || !password || !role || !permissions) {
-        return res.json({ success: false, message: 'Missing required fields' });
-    }
     try {
         const hashedPassword = await bcrypt.hash(password, 10);
-        db.run(
-            'INSERT INTO users (username, password, role, permissions) VALUES (?, ?, ?, ?)',
-            [username, hashedPassword, role, JSON.stringify(permissions)],
-            function(err) {
-                if (err) {
-                    console.error('User creation error:', err.message);
-                    return res.json({ success: false, message: 'Failed to create user' });
-                }
-                res.json({ success: true });
-            }
-        );
+        await User.create({
+            username,
+            password: hashedPassword,
+            role,
+            permissions: JSON.parse(permissions)
+        });
+        res.json({ success: true });
     } catch (err) {
-        console.error('User creation error:', err.message);
-        res.json({ success: false, message: 'Server error' });
+        console.error('User creation error:', err);
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 });
 
-app.put('/api/users/:id', ensureAuthenticated, async (req, res) => {
+app.put('/api/users/:id', requireAuth, upload.none(), async (req, res) => {
+    if (!req.user.permissions.includes('staff')) {
+        return res.status(403).json({ success: false, message: 'Unauthorized' });
+    }
     const { username, password, role, permissions } = req.body;
-    let query = 'UPDATE users SET username = ?, role = ?, permissions = ?';
-    const params = [username, role, JSON.stringify(permissions)];
-    if (password) {
-        query += ', password = ?';
-        params.push(await bcrypt.hash(password, 10));
-    }
-    query += ' WHERE id = ?';
-    params.push(req.params.id);
-    db.run(query, params, function(err) {
-        if (err) {
-            console.error('User update error:', err.message);
-            return res.json({ success: false, message: 'Failed to update user' });
+    try {
+        const user = await User.findByPk(req.params.id);
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'User not found' });
         }
-        if (this.changes === 0) {
-            return res.json({ success: false, message: 'User not found' });
+        const updates = { username, role, permissions: JSON.parse(permissions) };
+        if (password) {
+            updates.password = await bcrypt.hash(password, 10);
         }
+        await user.update(updates);
         res.json({ success: true });
-    });
+    } catch (err) {
+        console.error('User update error:', err);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
 });
 
-app.delete('/api/users/:id', ensureAuthenticated, (req, res) => {
-    db.run('DELETE FROM users WHERE id = ?', [req.params.id], function(err) {
-        if (err) {
-            console.error('User deletion error:', err.message);
-            return res.json({ success: false, message: 'Failed to delete user' });
+app.delete('/api/users/:id', requireAuth, async (req, res) => {
+    if (!req.user.permissions.includes('staff')) {
+        return res.status(403).json({ success: false, message: 'Unauthorized' });
+    }
+    try {
+        const user = await User.findByPk(req.params.id);
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'User not found' });
         }
-        if (this.changes === 0) {
-            return res.json({ success: false, message: 'User not found' });
-        }
+        await user.destroy();
         res.json({ success: true });
-    });
-});
-
-// Tasks
-app.get('/api/tasks', ensureAuthenticated, (req, res) => {
-    db.all('SELECT * FROM tasks', [], (err, tasks) => {
-        if (err) {
-            console.error('Tasks fetch error:', err.message);
-            return res.json({ success: false, message: 'Server error' });
-        }
-        res.json(tasks);
-    });
-});
-
-app.post('/api/tasks', ensureAuthenticated, upload.single('image'), (req, res) => {
-    const { title, type, description, due_date, urgency, allocated_to, season, recurrence } = req.body;
-    const image = req.file ? `/uploads/${req.file.filename}` : null;
-    const today = new Date().toISOString().split('T')[0];
-    if (!title || !type || !urgency) {
-        console.error('Missing required fields:', { title, type, urgency });
-        return res.json({ success: false, message: 'Title, type, and urgency are required' });
+    } catch (err) {
+        console.error('User deletion error:', err);
+        res.status(500).json({ success: false, message: 'Server error' });
     }
-    if (!due_date && (!season || season === 'all') && due_date !== today) {
-        console.error('Validation failed: due date or specific season required');
-        return res.json({ success: false, message: 'Either a due date or a specific season is required' });
+});
+
+app.get('/api/tasks', requireAuth, async (req, res) => {
+    const tasks = await Task.findAll();
+    res.json(tasks);
+});
+
+app.post('/api/tasks', requireAuth, upload.single('image'), async (req, res) => {
+    if (!req.user.permissions.includes('admin')) {
+        return res.status(403).json({ success: false, message: 'Unauthorized' });
     }
-    db.run(
-        `INSERT INTO tasks (title, type, description, due_date, urgency, allocated_to, season, image, completed, archived, recurrence) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [title, type, description || null, due_date || null, urgency, allocated_to || null, season || 'all', image, false, false, recurrence || null],
-        function(err) {
-            if (err) {
-                console.error('Task insertion error:', err.message);
-                return res.json({ success: false, message: 'Failed to add task' });
-            }
-            wss.clients.forEach(client => {
-                if (client.readyState === WebSocket.OPEN) {
-                    client.send(JSON.stringify({ type: 'new_task', id: this.lastID }));
-                }
-            });
-            res.json({ success: true });
-        }
-    );
-});
-
-app.put('/api/tasks/:id', ensureAuthenticated, upload.single('image'), (req, res) => {
-    const { title, type, description, due_date, urgency, allocated_to, season, recurrence, existing_image } = req.body;
-    const image = req.file ? `/uploads/${req.file.filename}` : existing_image;
-    db.run(
-        `UPDATE tasks SET title = ?, type = ?, description = ?, due_date = ?, urgency = ?, allocated_to = ?, season = ?, image = ?, recurrence = ? WHERE id = ?`,
-        [title, type, description || null, due_date || null, urgency, allocated_to || null, season || 'all', image, recurrence || null, req.params.id],
-        function(err) {
-            if (err) {
-                console.error('Task update error:', err.message);
-                return res.json({ success: false, message: 'Failed to update task' });
-            }
-            if (this.changes === 0) {
-                return res.json({ success: false, message: 'Task not found' });
-            }
-            wss.clients.forEach(client => {
-                if (client.readyState === WebSocket.OPEN) {
-                    client.send(JSON.stringify({ type: 'updated_task', id: req.params.id }));
-                }
-            });
-            res.json({ success: true });
-        }
-    );
-});
-
-app.post('/api/tasks/:id/complete', ensureAuthenticated, upload.single('completion_image'), (req, res) => {
-    const { completion_note } = req.body;
-    const completion_image = req.file ? `/uploads/${req.file.filename}` : null;
-    if (!completion_image && !completion_note) {
-        console.error('Completion validation failed:', { completion_image, completion_note });
-        return res.json({ success: false, message: 'Image or note required for completion' });
+    try {
+        const taskData = {
+            title: req.body.title,
+            type: req.body.type,
+            description: req.body.description,
+            due_date: req.body.due_date || null,
+            urgency: req.body.urgency,
+            allocated_to: req.body.allocated_to || null,
+            season: req.body.season,
+            recurrence: req.body.recurrence || null,
+            image: req.file ? `/uploads/${req.file.filename}` : null
+        };
+        const task = await Task.create(taskData);
+        broadcast({ type: 'new_task', task });
+        res.json({ success: true });
+    } catch (err) {
+        console.error('Task creation error:', err);
+        res.status(500).json({ success: false, message: 'Server error' });
     }
-    db.run(
-        `UPDATE tasks SET completed = ?, completion_image = ?, completion_note = ? WHERE id = ?`,
-        [true, completion_image, completion_note || null, req.params.id],
-        function(err) {
-            if (err) {
-                console.error('Task completion error:', err.message);
-                return res.json({ success: false, message: 'Failed to complete task' });
-            }
-            if (this.changes === 0) {
-                return res.json({ success: false, message: 'Task not found' });
-            }
-            wss.clients.forEach(client => {
-                if (client.readyState === WebSocket.OPEN) {
-                    client.send(JSON.stringify({ type: 'updated_task', id: req.params.id }));
-                }
-            });
-            res.json({ success: true });
-        }
-    );
 });
 
-app.post('/api/tasks/:id/archive', ensureAuthenticated, (req, res) => {
-    db.run(
-        `UPDATE tasks SET archived = ? WHERE id = ?`,
-        [true, req.params.id],
-        function(err) {
-            if (err) {
-                console.error('Task archive error:', err.message);
-                return res.json({ success: false, message: 'Failed to archive task' });
-            }
-            if (this.changes === 0) {
-                return res.json({ success: false, message: 'Task not found' });
-            }
-            wss.clients.forEach(client => {
-                if (client.readyState === WebSocket.OPEN) {
-                    client.send(JSON.stringify({ type: 'updated_task', id: req.params.id }));
-                }
-            });
-            res.json({ success: true });
+app.put('/api/tasks/:id', requireAuth, upload.single('image'), async (req, res) => {
+    if (!req.user.permissions.includes('admin')) {
+        return res.status(403).json({ success: false, message: 'Unauthorized' });
+    }
+    try {
+        const task = await Task.findByPk(req.params.id);
+        if (!task) {
+            return res.status(404).json({ success: false, message: 'Task not found' });
         }
-    );
+        const taskData = {
+            title: req.body.title,
+            type: req.body.type,
+            description: req.body.description,
+            due_date: req.body.due_date || null,
+            urgency: req.body.urgency,
+            allocated_to: req.body.allocated_to || null,
+            season: req.body.season,
+            recurrence: req.body.recurrence || null,
+            image: req.file ? `/uploads/${req.file.filename}` : req.body.existing_image
+        };
+        await task.update(taskData);
+        broadcast({ type: 'updated_task', task });
+        res.json({ success: true });
+    } catch (err) {
+        console.error('Task update error:', err);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
 });
 
-app.post('/api/tasks/:id/unarchive', ensureAuthenticated, (req, res) => {
-    db.run(
-        `UPDATE tasks SET archived = ? WHERE id = ?`,
-        [false, req.params.id],
-        function(err) {
-            if (err) {
-                console.error('Task unarchive error:', err.message);
-                return res.json({ success: false, message: 'Failed to unarchive task' });
-            }
-            if (this.changes === 0) {
-                return res.json({ success: false, message: 'Task not found' });
-            }
-            wss.clients.forEach(client => {
-                if (client.readyState === WebSocket.OPEN) {
-                    client.send(JSON.stringify({ type: 'updated_task', id: req.params.id }));
-                }
-            });
-            res.json({ success: true });
+app.post('/api/tasks/:id/complete', requireAuth, upload.single('completion_image'), async (req, res) => {
+    try {
+        const task = await Task.findByPk(req.params.id);
+        if (!task) {
+            return res.status(404).json({ success: false, message: 'Task not found' });
         }
-    );
-});
-
-app.delete('/api/tasks/:id', ensureAuthenticated, (req, res) => {
-    db.run('DELETE FROM tasks WHERE id = ?', [req.params.id], function(err) {
-        if (err) {
-            console.error('Task deletion error:', err.message);
-            return res.json({ success: false, message: 'Failed to delete task' });
+        if (req.user.role !== 'admin' && task.allocated_to !== req.user.username) {
+            return res.status(403).json({ success: 'Unauthorized' });
         }
-        if (this.changes === 0) {
-            return res.json({ success: false, message: 'Task not found' });
-        }
-        wss.clients.forEach(client => {
-            if (client.readyState === WebSocket.OPEN) {
-                client.send(JSON.stringify({ type: 'updated_task', id: req.params.id }));
-            }
+        await task.update({
+            completed: true,
+            completion_note: req.body.completion || null,
+            completion_image: req.file ? `/uploads/${req.file.filename}` : null
         });
+        broadcast({ type: 'updated_task', task });
         res.json({ success: true });
-    });
-});
-
-app.post('/api/tasks/from-issue', ensureAuthenticated, upload.single('image'), (req, res) => {
-    const { title, type, description, due_date, urgency, allocated_to, season, recurrence, issue_id } = req.body;
-    const image = req.file ? `/uploads/${req.file.filename}` : null;
-    if (!title || !type || !urgency) {
-        console.error('Missing required fields for task from issue:', { title, type, urgency });
-        return res.json({ success: false, message: 'Title, type, and urgency are required' });
+    } catch (err) {
+        console.error('Task completion error:', err);
+        res.status(500).json({ success: false, message: 'Server error' });
     }
-    db.run(
-        `INSERT INTO tasks (title, type, description, due_date, urgency, allocated_to, season, image, completed, archived, recurrence) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [title, type, description || null, due_date || null, urgency, allocated_to || null, season || 'all', image, false, false, recurrence || null],
-        function(err) {
-            if (err) {
-                console.error('Task from issue error:', err.message);
-                return res.json({ success: false, message: 'Failed to create task' });
-            }
-            db.run('DELETE FROM issues WHERE id = ?', [issue_id], (err) => {
-                if (err) console.error('Issue deletion error:', err.message);
-            });
-            wss.clients.forEach(client => {
-                if (client.readyState === WebSocket.OPEN) {
-                    client.send(JSON.stringify({ type: 'new_task', id: this.lastID }));
-                }
-            });
-            res.json({ success: true });
-        }
-    );
 });
 
-// Issues
-app.get('/api/issues', ensureAuthenticated, (req, res) => {
-    db.all('SELECT * FROM issues ORDER BY created_at DESC', [], (err, issues) => {
-        if (err) {
-            console.error('Issues fetch error:', err.message);
-            return res.json({ success: false, message: 'Server error' });
-        }
-        res.json(issues);
-    });
-});
-
-app.post('/api/issues', ensureAuthenticated, upload.single('image'), (req, res) => {
-    const { location, urgency, description, raised_by } = req.body;
-    const image = req.file ? `/uploads/${req.file.filename}` : null;
-    const created_at = new Date().toISOString();
-    if (!location || !urgency || !raised_by) {
-        console.error('Missing required fields for issue:', { location, urgency, raised_by });
-        return res.json({ success: false, message: 'Location, urgency, and raised_by are required' });
+app.post('/api/tasks/:id/archive', requireAuth, async (req, res) => {
+    if (!req.user.permissions.includes('admin')) {
+        return res.status(403).json({ success: false, message: 'Unauthorized' });
     }
-    db.run(
-        `INSERT INTO issues (location, urgency, image, description, raised_by, created_at) 
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [location, urgency, image, description || null, raised_by, created_at],
-        function(err) {
-            if (err) {
-                console.error('Issue creation error:', err.message);
-                return res.json({ success: false, message: 'Failed to add issue' });
-            }
-            wss.clients.forEach(client => {
-                if (client.readyState === WebSocket.OPEN) {
-                    client.send(JSON.stringify({ type: 'new_issue', id: this.lastID }));
-                }
-            });
-            res.json({ success: true });
+    try {
+        const task = await Task.findByPk(req.params.id);
+        if (!task) {
+            return res.status(404).json({ success: false, message: 'Task not found' });
         }
-    );
-});
-
-app.delete('/api/issues/:id', ensureAuthenticated, (req, res) => {
-    db.run('DELETE FROM issues WHERE id = ?', [req.params.id], function(err) {
-        if (err) {
-            console.error('Issue deletion error:', err.message);
-            return res.json({ success: false, message: 'Failed to delete issue' });
-        }
-        if (this.changes === 0) {
-            return res.json({ success: false, message: 'Issue not found' });
-        }
-        wss.clients.forEach(client => {
-            if (client.readyState === WebSocket.OPEN) {
-                client.send(JSON.stringify({ type: 'updated_issue', id: req.params.id }));
-            }
-        });
+        await task.update({ archived: true });
+        broadcast({ type: 'updated_task', task });
         res.json({ success: true });
+    } catch (err) {
+        console.error('Task archive error:', err);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
+app.post('/api/tasks/:id/unarchive', requireAuth, async (req, res) => {
+    if (!req.user.permissions.includes('admin')) {
+        return res.status(403).json({ success: false, message: 'Unauthorized' });
+    }
+    try {
+        const task = await Task.findByPk(req.params.id);
+        if (!task) {
+            return res.status(404).json({ success: false, message: 'Task not found' });
+        }
+        await task.update({ archived: false });
+        broadcast({ type: 'updated_task', task });
+        res.json({ success: true });
+    } catch (err) {
+        console.error('Task unarchive error:', err);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
+app.delete('/api/tasks/:id', requireAuthrequire, async (req, res) => {
+    if (!req.user.permissions.includes('admin')) {
+        return res.status(403).json({ success: false, message: 'Unauthorized' });
+    }
+    try {
+        const task = await Task.findByPk(req.params.id');
+        if (!task) {
+            return res.status(404).json({ success: false, message: 'Task not found' });
+        }
+        await task.destroy();
+        res.json({ success: true });
+    } catch (err) {
+        console.error('Task delete error:', err);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
+app.get('/api/issues', requireAuth, async (req, res) => {
+    const issues = await Issue.findAll();
+    res.json(issues);
+});
+
+app.post('/api/issues', requireAuthrequire, upload.single('image'), async (req, res) => {
+    try {
+        const issueData = {
+            location: req.body.location,
+            urgency: req.body.urgency,
+            description: req.body.description,
+            raised_by: req.body.raised_by,
+            image: req.file ? `/uploads/${req.file.filename}` : null
+        };
+        const issue = await Issue.create(issueData);
+        broadcast({ type: 'new_issue', issue });
+        res.json({ success: true });
+    } catch (err) {
+        console.error('Issue creation error:', err);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
+app.delete('/api/issues/:id', requireAuth, async (req, res) => {
+    if (!req.user.permissions.includes('issues')) {
+        return res.status(403).json({ success: false, error: 'Unauthorized' });
+    }
+    try {
+        const issue = await Issue.findByPk(req.params.id');
+        if (!issue) {
+            return res.status(404).json({ success: false, error: 'Issue not found' });
+        }
+        await issue.destroy();
+        res.json({ success: true });
+    } catch (err) {
+        console.error('Issue deletion error:', err);
+        res.status(500).json({ success: false, error: 'Server error' });
+    }
+});
+
+app.post('/api/tasks/from-issue', requireAuth, upload.single('image'), async (req, res) => {
+    if (!req.user.permissions.includes('admin')) {
+        return res.status(403).json({ success: false, message: 'Unauthorized' });
+    }
+    try {
+        const issue = await Issue.findByPk(req.body.issue_id);
+        if (!issue) {
+            return res.status(404).json({ success: false, message: 'Issue not found' });
+        }
+        const taskData = {
+            title: req.body.title || `Issue at ${issue.location}`,
+            type: req.body.type || 'maintenance',
+            description: req.body.description || issue.description,
+            due_date: req.body.due_date || null,
+            urgency: req.body.urgency || issue.urgency,
+            allocated_to: req.body.allocated_to || null,
+            season: req.body.season || 'all',
+            image: req.file ? `/uploads/${req.file.filename}` : issue.image
+        };
+        const task = await Task.create(taskData);
+        broadcast({ type: 'new_task', task });
+        res.json({ success: true });
+    } catch (err) {
+        console.error('Task from issue creation error:', err);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
+// Serve page files
+app.get('/login', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+app.get(['/', '/admin', '/archive', '/staff', '/issues'], requireAuth, (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// WebSocket server
+const server = app.listen(port, () => {
+    console.log(`Server running on port ${port}`);
+});
+
+const wss = new WebSocket.Server({ server });
+
+function broadcast(data) {
+    wss.clients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify(data));
+        }
     });
+}
+
+wss.on('connection', (ws) => {
+    console.log('WebSocket client connected');
+    ws.on('error', (err) => console.error('WebSocket error:', err));
 });
