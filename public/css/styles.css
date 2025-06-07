@@ -1,3 +1,4 @@
+/* Reset and base styles */
 * {
     box-sizing: border-box;
     margin: 0;
@@ -10,6 +11,7 @@ body {
     color: #333;
 }
 
+/* Navbar */
 .navbar {
     background-color: #2c3e50;
     padding: 15px 20px;
@@ -38,17 +40,20 @@ body {
     color: #ffffff;
 }
 
+/* Container */
 .container {
     max-width: 1200px;
     margin: 20px auto;
     padding: 0 20px;
 }
 
+/* Headings */
 h1, h2 {
     text-align: center;
     margin-bottom: 20px;
 }
 
+/* Task form */
 .task-form-container {
     display: flex;
     gap: 20px;
@@ -109,6 +114,7 @@ h1, h2 {
     background-color: #34495e;
 }
 
+/* Season buttons */
 .season-buttons {
     display: flex;
     gap: 8px;
@@ -133,6 +139,7 @@ h1, h2 {
     color: #ecf0f1;
 }
 
+/* Task list */
 .task-list {
     margin-top: 20px;
 }
@@ -160,6 +167,7 @@ h1, h2 {
     gap: 15px;
 }
 
+/* Admin task card */
 .admin-task-card {
     background-color: #fff;
     padding: 12px;
@@ -246,12 +254,14 @@ h1, h2 {
     text-align: right;
 }
 
+/* Completed note */
 .completed-note {
     color: #2ecc71;
     font-weight: bold;
     font-size: 0.9em;
 }
 
+/* Filter buttons */
 .filter-buttons {
     display: flex;
     flex-wrap: wrap;
@@ -270,7 +280,8 @@ h1, h2 {
 }
 
 .filter-btn.active {
-    background-color: #b0b0b0;
+    background-color: #4CAF50; /* Updated from inline CSS */
+    color: white;
 }
 
 @media (max-width: 600px) {
@@ -287,6 +298,7 @@ h1, h2 {
     }
 }
 
+/* Task card */
 .task-card {
     background-color: #fff;
     padding: 12px;
@@ -343,6 +355,7 @@ h1, h2 {
     cursor: pointer;
 }
 
+/* Complete button */
 .complete-btn {
     width: 100%;
     padding: 10px;
@@ -359,6 +372,7 @@ h1, h2 {
     background-color: #98A592;
 }
 
+/* Image modal */
 .image-modal {
     position: fixed;
     top: 0;
@@ -387,6 +401,7 @@ h1, h2 {
     cursor: pointer;
 }
 
+/* General form styles */
 form {
     max-width: 400px;
     margin: 0 auto;
@@ -413,6 +428,7 @@ form button:hover {
     background-color: #d0d0d0;
 }
 
+/* Users list */
 .users-list {
     margin-top: 20px;
 }
@@ -464,6 +480,7 @@ form button:hover {
     background-color: #c0392b;
 }
 
+/* Modal */
 .modal {
     position: fixed;
     top: 0;
@@ -471,7 +488,7 @@ form button:hover {
     width: 100%;
     height: 100%;
     background-color: rgba(0, 0, 0, 0.5);
-    display: none; /* Ensure modal is hidden by default */
+    display: none;
     justify-content: center;
     align-items: center;
     z-index: 1000;
@@ -524,6 +541,80 @@ form button:hover {
     background-color: #34495e;
 }
 
+/* Toast notification (from inline CSS) */
+.toast {
+    position: fixed;
+    bottom: 10px;
+    right: 10px;
+    background: #333;
+    color: #fff;
+    padding: 10px;
+    border-radius: 4px;
+    z-index: 1000;
+}
+
+/* Issue card (from inline CSS) */
+.issue-card {
+    background-color: #fff;
+    padding: 12px;
+    border-radius: 8px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    border: 1px solid #ccc;
+    margin: 5px;
+}
+
+.issue-card.urgent {
+    border: 2px solid #ff0000;
+}
+
+/* Login form (from inline CSS) */
+#login-form {
+    max-width: 300px;
+    margin: 20px auto;
+}
+
+/* Page-specific containers (from inline CSS) */
+#admin-tasks, #archive-tasks, #users-list, #issues-list {
+    margin: 20px;
+}
+
+/* General input, textarea, select (from inline CSS, merged with task-form styles) */
+input, textarea, select {
+    display: block;
+    width: 100%;
+    margin: 5px 0;
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 1em;
+}
+
+/* Raise issue button */
+#raise-issue-btn {
+    background-color: #2c3e50;
+    color: #ecf0f1;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 1em;
+    transition: background-color 0.3s;
+    margin: 10px;
+}
+
+#raise-issue-btn:hover {
+    background-color: #34495e;
+}
+
+/* Error messages */
+#login-error, #issue-form-error, #complete-form-error {
+    color: red;
+    display: none;
+    margin-top: 10px;
+    font-size: 0.9em;
+}
+
+/* Responsive adjustments */
 @media (max-width: 600px) {
     .navbar {
         display: none;
