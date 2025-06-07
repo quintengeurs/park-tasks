@@ -40,6 +40,11 @@ app.use('/api/users', userRoutes);
 app.use('/api/issues', issueRoutes);
 app.use('/api/auth', authRoutes);
 
+const sequelize = new Sequelize(process.env.DATABASE_URL, {
+  dialect: 'postgres',
+  logging: false,
+});
+
 // Create uploads directory
 const fs = require('fs');
 fs.mkdirSync('./uploads', { recursive: true });
