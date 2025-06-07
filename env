@@ -1,5 +1,0 @@
-/ .env (example)
-NODE_ENV=production
-DATABASE_URL=your_postgresql_database_url_from_render
-SESSION_SECRET=your_secret_session_key_here
-PORT=3000
