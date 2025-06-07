@@ -3,24 +3,73 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Seasonal Tasks</title>
-    <link rel="stylesheet" href="css/styles.css">
+    <title>Park Tasks</title>
+    <link rel="stylesheet" href="/css/styles.css">
 </head>
 <body>
     <nav id="navbar" class="navbar"></nav>
-    <div class="container">
-        <h1>Tasks</h1>
+    <div id="tasks">
         <div class="filter-buttons">
-            <button class="filter-btn active" data-type="all">All</button>
+            <button class="filter-btn" data-type="all">All</button>
             <button class="filter-btn" data-type="maintenance">Maintenance</button>
-            <button class="filter-btn" data-type="planting">Planting</button>
-            <button class="filter-btn" data-type="harvesting">Harvesting</button>
-            <button class="filter-btn" data-type="allocated">Allocated to Me</button>
+            <button class="filter-btn" data-type="allocated">Allocated</button>
         </div>
-        <div id="tasks" class="task-list">
-            <div class="tasks"></div>
+        <div class="tasks"></div>
+    </div>
+    <div id="login" style="display: none;">
+        <form id="login-form">
+            <label for="username">Username</label>
+            <input type="text" id="username" name="username" required>
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" required>
+            <button type="submit">Login</button>
+            <p id="login-error"></p>
+        </form>
+    </div>
+    <div id="admin-tasks" style="display: none;"></div>
+    <div id="archive-tasks" style="display: none;"></div>
+    <div id="users-list" style="display: none;"></div>
+    <div id="issues-list" style="display: none;"></div>
+    <button id="raise-issue-btn">Raise Issue</button>
+    <div id="issue-modal" class="modal">
+        <div class="modal-content">
+            <span id="close-issue-modal" class="close">&times;</span>
+            <h2>Raise Issue</h2>
+            <form id="issue-form">
+                <label for="issue-location">Location</label>
+                <input type="text" id="issue-location" name="location" required>
+                <label for="issue-urgency">Urgency</label>
+                <select id="issue-urgency" name="urgency" required>
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                    <option value="urgent">Urgent</option>
+                </select>
+                <label for="issue-description">Description</label>
+                <textarea id="issue-description" name="description"></textarea>
+                <label for="issue-image">Image</label>
+                <input type="file" id="issue-image" name="image" accept="image/*">
+                <input type="hidden" name="raised_by">
+                <button type="submit">Submit Issue</button>
+                <p id="issue-form-error"></p>
+            </form>
         </div>
     </div>
-    <script src="js/scripts.js"></script>
+    <div id="complete-task-modal" class="modal">
+        <div class="modal-content">
+            <span id="close-complete-modal" class="close">&times;</span>
+            <h2>Complete Task</h2>
+            <form id="complete-task-form">
+                <input type="hidden" name="task_id">
+                <label for="completion-note">Completion Note</label>
+                <textarea id="completion-note" name="completion_note"></textarea>
+                <label for="completion-image">Completion Image</label>
+                <input type="file" id="completion-image" name="completion_image" accept="image/*">
+                <button type="submit">Submit</button>
+                <p id="complete-form-error"></p>
+            </form>
+        </div>
+    </div>
+    <script src="/js/scripts.js"></script>
 </body>
 </html>
