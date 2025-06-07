@@ -55,11 +55,17 @@ db.run(`CREATE TABLE IF NOT EXISTS tasks (
 const hashedPassword = bcrypt.hashSync('admin123', 10);
 db.run(`INSERT OR IGNORE INTO users (username, password, role) VALUES (?, ?, ?)`, ['admin', hashedPassword, 'admin']);
 
-// Sequelize for session storage
-const sequelize = new Sequelize({
-    dialect: 'sqlite',
-    storage: 'database.db'
-});
+sequelize.sync({ force: true }).then(() => {
+    console.log('Connected to SQLite database');
+    // Seed an admin user for testing
+    User.create({
+        username: 'admin',
+        password: bcrypt.hashSync('admin123', 10),
+        role: 'admin',
+        permissions: ['tasks', 'issues']
+    });
+    app.listen(10000, () => console.log('Server running on port 10000'));
+}).catch(err => console.error('Database initialization error:', err));
 
 // Middleware
 app.use(express.json());
@@ -118,16 +124,36 @@ app.get('/login', (req, res) => {
     res.sendFile(path.join(__dirname, 'public/login.html'));
 });
 
-app.post('/api/login', (req, res) => {
+app.post('/login', async (req, res) => {
     const { username, password } = req.body;
-    db.get(`SELECT * FROM users WHERE username = ?`, [username], (err, user) => {
-        if (err || !user || !bcrypt.compareSync(password, user.password)) {
-            return res.json({ success: false, message: 'Invalid credentials' });
+    if (!username || !password) {
+        return res.status(400).json({ success: false, message: 'Username and password are required' });
+    }
+    try {
+        const user = await User.findOne({ where: { username } });
+        if (!user) {
+            return res.status(401).json({ success: false, message: 'User not found' });
         }
-        req.session.user = { id: user.id, username: user.username, role: user.role };
-        res.json({ success: true });
-    });
+        if (!(await bcrypt.compare(password, user.password))) {
+            return res.status(401).json({ success: false, message: 'Invalid password' });
+        }
+        req.session.user = { id: user.id, username: user.username, role: user.role, permissions: user.permissions };
+        res.json({ success: true, user: req.session.user });
+    } catch (error) {
+        console.error('Login error:', error);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
 });
+
+// Add a route to check session
+app.get('/check-session', (req, res) => {
+    if (req.session.user) {
+        res.json({ success: true, user: req.session.user });
+    } else {
+        res.status(401).json({ success: false, message: 'Not logged in' });
+    }
+});
+
 
 app.get('/api/current-user', (req, res) => {
     if (req.session.user) {
