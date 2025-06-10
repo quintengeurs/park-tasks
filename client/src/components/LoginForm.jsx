@@ -4,6 +4,10 @@ import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 
+const api = axios.create({
+  baseURL: 'https://park-tasks.onrender.com',
+});
+
 const LoginForm = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -13,24 +17,26 @@ const LoginForm = () => {
 
   const mutation = useMutation({
     mutationFn: async ({ email, password }) => {
-      const response = await axios.post('https://park-tasks.onrender.com/api/auth/login', { email, password });
+      console.log('Sending login request to: https://park-tasks.onrender.com/api/auth/login'); // Debug
+      const response = await api.post('/api/auth/login', { email, password });
+      console.log('Raw login response:', response); // Debug
       return response.data;
     },
     onSuccess: (data) => {
-      console.log('Login response:', data); // Debug: Check token and user
+      console.log('Login response data:', data); // Debug
       if (data.token && data.user) {
         localStorage.setItem('token', data.token);
-        login(data.user); // Set user state
+        login(data.user);
         console.log('Token stored:', localStorage.getItem('token')); // Debug
         console.log('User logged in:', data.user); // Debug
-        setTimeout(() => navigate('/tasks'), 0); // Delay navigate
+        setTimeout(() => navigate('/tasks'), 0);
       } else {
         console.error('Invalid login response:', data);
         setError('Invalid response from server');
       }
     },
     onError: (err) => {
-      console.error('Login error:', err); // Debug
+      console.error('Login error:', err.response || err); // Debug
       setError(err.response?.data?.error || 'Login failed');
     },
   });
