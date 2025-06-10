@@ -11,7 +11,6 @@ const path = require('path');
 
 const app = express();
 
-// Configure multer for file uploads
 const storage = multer.diskStorage({
   destination: './uploads/',
   filename: (req, file, cb) => {
@@ -21,14 +20,11 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 app.use(cors({
-  origin: 'https://park-staff-frontend.onrender.com', // Replace with your frontend Render URL
+  origin: 'https://park-staff-frontend.onrender.com', // Replace with frontend URL
 }));
 app.use(express.json());
-
-// Serve static files (uploads)
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// File upload endpoint
 app.post('/api/upload', upload.single('image'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   res.json({ filePath: `/uploads/${req.file.filename}` });
@@ -40,16 +36,9 @@ app.use('/api/users', userRoutes);
 app.use('/api/issues', issueRoutes);
 app.use('/api/auth', authRoutes);
 
-const sequelize = new Sequelize(process.env.DATABASE_URL, {
-  dialect: 'postgres',
-  logging: false,
-});
-
-// Create uploads directory
 const fs = require('fs');
 fs.mkdirSync('./uploads', { recursive: true });
 
-// Test database connection
 sequelize.authenticate()
   .then(() => console.log('PostgreSQL connected'))
   .catch((err) => console.error('PostgreSQL connection error:', err));
