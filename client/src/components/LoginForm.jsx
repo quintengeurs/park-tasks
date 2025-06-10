@@ -13,19 +13,24 @@ const LoginForm = () => {
 
   const mutation = useMutation({
     mutationFn: async ({ email, password }) => {
-      const response = await axios.post('/api/auth/login', { email, password });
+      const response = await axios.post('https://park-tasks.onrender.com/api/auth/login', { email, password });
       return response.data;
     },
     onSuccess: (data) => {
       console.log('Login response:', data); // Debug: Check token and user
-      localStorage.setItem('token', data.token);
-      login(data.user); // Set user state
-      console.log('Token stored:', localStorage.getItem('token')); // Debug: Verify storage
-      console.log('User logged in:', data.user); // Debug: Verify user
-      setTimeout(() => navigate('/tasks'), 0); // Delay navigate to ensure state update
+      if (data.token && data.user) {
+        localStorage.setItem('token', data.token);
+        login(data.user); // Set user state
+        console.log('Token stored:', localStorage.getItem('token')); // Debug
+        console.log('User logged in:', data.user); // Debug
+        setTimeout(() => navigate('/tasks'), 0); // Delay navigate
+      } else {
+        console.error('Invalid login response:', data);
+        setError('Invalid response from server');
+      }
     },
     onError: (err) => {
-      console.error('Login error:', err); // Debug: Log errors
+      console.error('Login error:', err); // Debug
       setError(err.response?.data?.error || 'Login failed');
     },
   });
