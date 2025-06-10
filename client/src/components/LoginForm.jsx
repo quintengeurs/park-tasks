@@ -18,7 +18,7 @@ const LoginForm = () => {
     },
     onSuccess: (data) => {
       localStorage.setItem('token', data.token);
-      login(data.user); // Update auth context
+      login(data.user); // Expects { id, email, role, name }
       navigate('/tasks');
     },
     onError: (err) => {
