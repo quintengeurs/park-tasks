@@ -44,6 +44,6 @@ sequelize.authenticate()
   .then(() => console.log('PostgreSQL connected'))
   .catch((err) => console.error('PostgreSQL connection error:', err));
 
-app.listen(process.env.PORT || 5000, () => {
-  console.log(`Server running on port ${process.env.PORT || 5000}`);
+app.listen(process.env.PORT || 3000, () => {
+  console.log(`Server running on port ${process.env.PORT || 3000}`);
 });
