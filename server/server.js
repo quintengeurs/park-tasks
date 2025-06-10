@@ -11,14 +11,6 @@ const path = require('path');
 
 const app = express();
 
-const storage = multer.diskStorage({
-  destination: './uploads/',
-  filename: (req, file, cb) => {
-    cb(null, `${Date.now()}-${file.originalname}`);
-  },
-});
-const upload = multer({ storage });
-
 app.use(cors({
   origin: 'https://park-staff-frontend.onrender.com',
   credentials: true,
@@ -26,16 +18,12 @@ app.use(cors({
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-app.post('/api/upload', upload.single('image'), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-  res.json({ filePath: `/uploads/${req.file.filename}` });
-});
-
 app.use('/api/tasks', taskRoutes);
 app.use('/api/ppe', ppeRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/issues', issueRoutes);
 app.use('/api/auth', authRoutes);
+
 
 const fs = require('fs');
 fs.mkdirSync('./uploads', { recursive: true });
