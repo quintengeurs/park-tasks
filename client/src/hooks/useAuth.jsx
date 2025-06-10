@@ -6,7 +6,7 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
 
   const login = (userData) => {
-    setUser(userData);
+    setUser(userData); // Expects { id, email, role, name }
   };
 
   const logout = () => {
