@@ -17,11 +17,15 @@ const LoginForm = () => {
       return response.data;
     },
     onSuccess: (data) => {
+      console.log('Login response:', data); // Debug: Check token and user
       localStorage.setItem('token', data.token);
-      login(data.user); // Expects { id, email, role, name }
-      navigate('/tasks');
+      login(data.user); // Set user state
+      console.log('Token stored:', localStorage.getItem('token')); // Debug: Verify storage
+      console.log('User logged in:', data.user); // Debug: Verify user
+      setTimeout(() => navigate('/tasks'), 0); // Delay navigate to ensure state update
     },
     onError: (err) => {
+      console.error('Login error:', err); // Debug: Log errors
       setError(err.response?.data?.error || 'Login failed');
     },
   });
