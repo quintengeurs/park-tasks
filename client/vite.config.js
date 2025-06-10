@@ -5,8 +5,16 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/api': 'https://park-tasks.onrender.com', // Backend URL
-      '/uploads': 'https://park-tasks.onrender.com', // For file serving
+      '/api': {
+        target: 'https://park-tasks.onrender.com',
+        changeOrigin: true,
+        secure: true,
+      },
+      '/uploads': {
+        target: 'https://park-tasks.onrender.com',
+        changeOrigin: true,
+        secure: true,
+      },
     },
   },
 });
