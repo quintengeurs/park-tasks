@@ -20,7 +20,8 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 app.use(cors({
-  origin: 'https://park-staff-frontend.onrender.com', // Replace with frontend URL
+  origin: 'https://park-staff-frontend.onrender.com',
+  credentials: true,
 }));
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
