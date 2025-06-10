@@ -10,7 +10,7 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (token) {
-      axios.get('/api/auth/me', {
+      axios.get('https://park-tasks.onrender.com/api/auth/me', {
         headers: { Authorization: `Bearer ${token}` },
       })
         .then((response) => {
