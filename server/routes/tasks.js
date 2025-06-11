@@ -1,26 +1,20 @@
 const express = require('express');
+const { Pool } = require('pg');
 const router = express.Router();
-const { Task } = require('../models');
-const authMiddleware = require('../middleware/auth');
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
-router.get('/', authMiddleware, async (req, res) => {
-  const tasks = await Task.findAll({
-    where: { status: req.query.status || 'assigned' },
-  });
-  res.json(tasks);
+router.post('/', async (req, res) => {
+  const { title, description, image_url, urgency, schedule_type, schedule_details, assigned_to } = req.body;
+  const result = await pool.query(
+    'INSERT INTO tasks (title, description, image_url, urgency, schedule_type, schedule_details, assigned_to) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
+    [title, description, image_url, urgency, schedule_type, JSON.stringify(schedule_details), assigned_to]
+  );
+  res.json(result.rows[0]);
 });
 
-router.patch('/:id', authMiddleware, async (req, res) => {
-  const { status, completedImage, completedNote } = req.body;
-  const task = await Task.findByPk(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
-  await task.update({
-    status,
-    completedImage,
-    completedNote,
-    completedAt: status === 'pending' ? new Date() : task.completedAt,
-  });
-  res.json(task);
+router.get('/', async (req, res) => {
+  const result = await pool.query('SELECT * FROM tasks');
+  res.json(result.rows);
 });
 
 module.exports = router;
