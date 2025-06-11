@@ -26,7 +26,7 @@ app.use(cors({
 app.use(express.json());
 
 // Serve static files for uploads
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/uploads', express.static(path.join(__dirname, 'Uploads')));
 
 // Multer configuration for file uploads
 const storage = multer.diskStorage({
@@ -65,7 +65,7 @@ app.use('*', (req, res) => {
 // Database connection
 sequelize.authenticate()
   .then(() => {
-    console.log('PostgreSQL connected');
+    console.log('PostgreSQL connected to seasonal-tasks');
     // Sync models (optional, use with caution in production)
     // sequelize.sync({ force: false }).then(() => console.log('Models synced'));
   })
