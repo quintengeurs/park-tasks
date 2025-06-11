@@ -1,6 +1,12 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import axios from 'axios';
 
+const api = axios.create({
+  baseURL: 'https://park-services.onrender.com',
+  headers: { 'Content-Type': 'application/json' },
+  timeout: 10000,
+});
+
 const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
@@ -10,7 +16,8 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (token) {
-      axios.get('https://park-tasks.onrender.com/api/auth/me', {
+      console.log('Fetching /api/auth/me'); // Debug
+      api.get('/api/auth/me', {
         headers: { Authorization: `Bearer ${token}` },
       })
         .then((response) => {
@@ -18,7 +25,7 @@ export const AuthProvider = ({ children }) => {
           setUser(response.data);
         })
         .catch((error) => {
-          console.error('Auth/me error:', error); // Debug
+          console.error('Auth/me error:', error.response?.data || error.message); // Debug
           localStorage.removeItem('token');
         })
         .finally(() => setLoading(false));
