@@ -2,24 +2,24 @@ import React, { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from './hooks/useAuth';
+import { useAuth } from '../hooks/useAuth';
 
 const api = axios.create({
-  baseURL: 'https://park-services.onrender.com',
+  baseURL: 'https://park-tasks.onrender.com',
   headers: { 'Content-Type': 'application/json' },
-  timeout: 10000, // 10s timeout
+  timeout: 10000,
 });
 
 const LoginForm = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setErrorMessage] = useState('');
+  const [error, setError] = useState('');
   const navigate = useNavigate();
   const { login } = useAuth();
 
   const mutation = useMutation({
     mutationFn: async ({ email, password }) => {
-      console.log('Sending login request to: https://park-services.onrender.com/api/auth/login', { email }); // Debug
+      console.log('Sending login request to: https://park-tasks.onrender.com/api/auth/login', { email }); // Debug
       const response = await api.post('/api/auth/login', { email, password });
       console.log('Raw login response:', { status: response.status, headers: response.headers, data: response.data }); // Debug
       return response.data;
@@ -31,7 +31,7 @@ const LoginForm = () => {
         login(data.user);
         console.log('Token stored:', localStorage.getItem('token')); // Debug
         console.log('User logged in:', data.user); // Debug
-        setTimeout(() => navigate('/tasks'), 100); // Increased delay
+        setTimeout(() => navigate('/tasks'), 100);
       } else {
         console.error('Invalid login response:', data);
         setError('Invalid server response');
@@ -51,32 +51,32 @@ const LoginForm = () => {
 
   return (
     <div className="max-w-md mx-auto p-4">
-      <h2 className="text-2xl font-semibold mb-6">Login</h2>
+      <h2 className="text-2xl font-bold mb-4">Login</h2>
       {error && <p className="text-red-500 mb-4">{error}</p>}
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="block text-sm font-medium mb-1">Email</label>
+          <label className="block mb-1">Email</label>
           <input
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full p-2 border rounded"
             required
           />
         </div>
         <div>
-          <label className="block text-sm font-medium mb-1">Password</label>
+          <label className="block mb-1">Password</label>
           <input
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="w-full p-3 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full p-2 border rounded"
             required
           />
         </div>
         <button
           type="submit"
-          className="w-full bg-blue-500 text-white py-3 px-4 rounded-md hover:bg-blue-600 transition-colors"
+          className="w-full bg-blue-500 text-white p-2 rounded"
           disabled={mutation.isLoading}
         >
           {mutation.isLoading ? 'Logging in...' : 'Login'}
