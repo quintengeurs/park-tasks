@@ -1,62 +1,30 @@
-const sqlite3 = require('sqlite3').verbose();
-const bcrypt = require('bcrypt');
+const { Pool } = require('pg');
+  const bcrypt = require('bcrypt');
 
-const db = new sqlite3.Database('tasks.db');
+  const pool = new Pool({
+      connectionString: `${process.env.SUPABASE_URL}/postgres?pgbouncer=true&connection_limit=1`,
+      ssl: { rejectUnauthorized: false },
+      user: 'postgres',
+      password: process.env.SUPABASE_KEY,
+      host: process.env.SUPABASE_URL.replace('https://', '').split('/')[0],
+      database: 'postgres',
+      port: 5432
+  });
 
-async function initDatabase() {
-    return new Promise((resolve, reject) => {
-        db.serialize(() => {
-            // Users table
-            db.run(`
-                CREATE TABLE IF NOT EXISTS users (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    username TEXT UNIQUE,
-                    password TEXT
-                )
-            `);
+  async function initDatabase() {
+      try {
+          const client = await pool.connect();
+          const hashedPassword = bcrypt.hashSync('admin123', 10);
+          await client.query(`
+              INSERT INTO users (username, password)
+              VALUES ($1, $2)
+              ON CONFLICT (username) DO NOTHING
+          `, ['admin', hashedPassword]);
+          client.release();
+      } catch (err) {
+          console.error('Database initialization error:', err);
+          throw err;
+      }
+  }
 
-            // Tasks table
-            db.run(`
-                CREATE TABLE IF NOT EXISTS tasks (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER,
-                    title TEXT,
-                    description TEXT,
-                    image TEXT,
-                    completed BOOLEAN,
-                    archived BOOLEAN,
-                    created_at TEXT,
-                    FOREIGN KEY (user_id) REFERENCES users(id)
-                )
-            `);
-
-            // Issues table
-            db.run(`
-                CREATE TABLE IF NOT EXISTS issues (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER,
-                    location TEXT,
-                    description TEXT,
-                    urgency INTEGER,
-                    image TEXT,
-                    resolved BOOLEAN,
-                    created_at TEXT,
-                    FOREIGN KEY (user_id) REFERENCES users(id)
-                )
-            `);
-
-            // Insert a default user (username: admin, password: admin123)
-            const hashedPassword = bcrypt.hashSync('admin123', 10);
-            db.run(
-                `INSERT OR IGNORE INTO users (username, password) VALUES (?, ?)`,
-                ['admin', hashedPassword],
-                (err) => {
-                    if (err) reject(err);
-                    else resolve();
-                }
-            );
-        });
-    });
-}
-
-module.exports = { db, initDatabase };
+  module.exports = { pool, initDatabase };
