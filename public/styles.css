@@ -1,0 +1,441 @@
+body, html {
+    margin: 0;
+    padding: 0;
+    height: 100vh;
+    width: 100vw;
+    overflow: auto;
+    font-family: Arial, sans-serif;
+}
+
+.container {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+}
+
+.canvas {
+    position: relative;
+    width: 6000px;
+    height: 1200px;
+    background-color: #f0f0f0;
+}
+
+/* Navigation Menu */
+.nav, .task-nav {
+    position: fixed;
+    z-index: 1000;
+    width: 80px;
+    height: 80px;
+    background-color: rgba(0, 123, 255, 0.5);
+    border-radius: 50%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    transition: width 0.5s ease, height 0.5s ease, border-radius 0.5s ease, background-color 0.5s ease;
+    cursor: pointer;
+}
+
+.nav {
+    top: 20px;
+    right: 20px;
+}
+
+.task-nav {
+    top: 120px;
+    right: 20px;
+    background-color: rgba(40, 167, 69, 0.5);
+}
+
+.nav:hover, .task-nav:hover {
+    width: 180px;
+    height: 180px;
+    border-radius: 10px;
+    background-color: rgba(255, 255, 255, 0.9);
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+}
+
+.nav::before, .task-nav::before {
+    content: '';
+    background-image: url('https://static.thenounproject.com/png/2195395-200.png');
+    background-size: 40px 40px;
+    background-position: center;
+    background-repeat: no-repeat;
+    width: 40px;
+    height: 40px;
+    display: block;
+    opacity: 1;
+    transition: opacity 0.5s ease;
+}
+
+.nav:hover::before, .task-nav:hover::before {
+    opacity: 0;
+}
+
+.nav-buttons, .task-nav-buttons {
+    display: none;
+    width: 100%;
+    height: 100%;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    box-sizing: border-box;
+}
+
+.nav:hover .nav-buttons, .task-nav:hover .task-nav-buttons {
+    display: flex;
+}
+
+.nav button, .task-nav button {
+    width: 80px;
+    height: 80px;
+    font-size: 12px;
+    cursor: pointer;
+    border: none;
+    background-color: rgba(40, 167, 69, 0.8);
+    color: white;
+    border-radius: 3px;
+    opacity: 0;
+    transform: scale(0.8);
+    transition: opacity 0.5s ease, transform 0.5s ease, background-color 0.3s ease;
+}
+
+.nav:hover button, .task-nav:hover button {
+    opacity: 1;
+    transform: scale(1);
+}
+
+.nav button:hover, .task-nav button:hover {
+    background-color: #218838;
+    transform: scale(1.05);
+}
+
+.nav:not(:hover) button, .task-nav:not(:hover) button {
+    transition-delay: 0s;
+}
+
+.nav:hover button:nth-child(1), .task-nav:hover button:nth-child(1) { transition-delay: 0.1s; }
+.nav:hover button:nth-child(2), .task-nav:hover button:nth-child(2) { transition-delay: 0.15s; }
+.nav:hover button:nth-child(3), .task-nav:hover button:nth-child(3) { transition-delay: 0.2s; }
+.nav:hover button:nth-child(4), .task-nav:hover button:nth-child(4) { transition-delay: 0.25s; }
+
+/* Modal Styles */
+.modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    z-index: 2000;
+    justify-content: center;
+    align-items: center;
+}
+
+.modal-content {
+    background-color: white;
+    padding: 15px;
+    border-radius: 8px;
+    width: 90%;
+    max-width: 400px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+}
+
+.modal-content h2 {
+    margin-top: 0;
+    font-size: 1.5em;
+}
+
+.modal-content form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.modal-content input, .modal-content select, .modal-content textarea {
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+    font-size: 1em;
+}
+
+.modal-content button {
+    padding: 8px 16px;
+    background-color: #28a745;
+    color: white;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+.modal-content button:hover {
+    background-color: #218838;
+}
+
+.modal-content .close {
+    background-color: #6c757d;
+}
+
+.modal-content .close:hover {
+    background-color: #5a6268;
+}
+
+.modal-content img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 5px;
+}
+
+.section {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    align-items: center;
+    color: white;
+    text-align: center;
+    border-radius: 10px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+    padding: 15px;
+    box-sizing: border-box;
+}
+
+.section1 { top: 100px; left: 200px; background-color: #ff6b6b; width: 1200px; min-height: 900px; }
+.section2 { top: 100px; left: 1600px; background-color: #4ecdc4; width: 1200px; min-height: 700px; }
+.section3 { top: 100px; left: 3000px; background-color: #45b7d1; width: 1200px; min-height: 900px; transition: min-height 0.3s ease; }
+.section4 { top: 100px; left: 4400px; background-color: #96ceb4; width: 1200px; min-height: 700px; }
+
+/* Task Card Grid */
+.task-grid, .archive-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 15px;
+    width: 100%;
+    max-width: 1100px;
+    margin-top: 15px;
+}
+
+.task-card {
+    background-color: white;
+    color: black;
+    border-radius: 8px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+    padding: 12px;
+    text-align: left;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    transition: transform 0.3s, box-shadow 0.3s;
+}
+
+.task-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+}
+
+.task-card img {
+    width: 100%;
+    height: 120px;
+    object-fit: cover;
+    border-radius: 5px;
+    transition: opacity 0.3s;
+}
+
+.task-card:hover img {
+    opacity: 0.9;
+}
+
+.task-card h3 {
+    margin: 8px 0;
+    font-size: 1.2em;
+}
+
+.task-card p {
+    margin: 0 0 8px;
+    font-size: 0.9em;
+}
+
+.task-card .button-container {
+    display: flex;
+    gap: 8px;
+}
+
+.task-card button {
+    padding: 8px 12px;
+    background-color: #28a745;
+    color: white;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: background-color 0.3s, transform 0.2s;
+}
+
+.task-card button.completed {
+    background-color: #6c757d;
+    cursor: not-allowed;
+}
+
+.task-card button:hover:not(.completed) {
+    background-color: #218838;
+    transform: scale(1.05);
+}
+
+.task-card .approve-button {
+    display: none;
+}
+
+.task-card.completed .approve-button {
+    display: inline-block;
+}
+
+/* Issues Table */
+.issues-table {
+    width: 100%;
+    max-width: 1100px;
+    border-collapse: collapse;
+    margin-top: 15px;
+    background-color: white;
+    color: black;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.issues-table th, .issues-table td {
+    padding: 10px;
+    text-align: left;
+    border-bottom: 1px solid #ddd;
+}
+
+.issues-table th {
+    background-color: #343a40;
+    color: white;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+.issues-table th:hover {
+    background-color: #495057;
+}
+
+.issues-table tr:nth-child(even) {
+    background-color: #f8f9fa;
+}
+
+.issues-table tr:hover {
+    background-color: #e9ecef;
+}
+
+.issues-table .urgent-high { color: red; font-weight: bold; }
+.issues-table .urgent-medium { color: orange; font-weight: bold; }
+.issues-table .urgent-low { color: green; font-weight: bold; }
+
+.issues-table .image-link {
+    color: #007bff;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.issues-table .image-link:hover {
+    color: #0056b3;
+}
+
+.issues-table .button-container {
+    display: flex;
+    gap: 8px;
+}
+
+.issues-table button {
+    padding: 8px 12px;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: background-color 0.3s, transform 0.2s;
+}
+
+.issues-table .resolve-button {
+    background-color: #28a745;
+    color: white;
+}
+
+.issues-table .resolve-button:hover {
+    background-color: #218838;
+    transform: scale(1.05);
+}
+
+.issues-table .task-button {
+    background-color: #007bff;
+    color: white;
+}
+
+.issues-table .task-button:hover {
+    background-color: #0056b3;
+    transform: scale(1.05);
+}
+
+/* Mobile Responsiveness */
+@media (max-width: 768px) {
+    .canvas {
+        width: 100%;
+        height: auto;
+        min-height: 100vh;
+    }
+
+    .section {
+        position: relative;
+        top: 0 !important;
+        left: 0 !important;
+        width: 90%;
+        margin: 20px auto;
+    }
+
+    .nav, .task-nav {
+        width: 60px;
+        height: 60px;
+    }
+
+    .nav:hover, .task-nav:hover {
+        width: 150px;
+        height: 150px;
+    }
+
+    .nav button, .task-nav button {
+        width: 60px;
+        height: 60px;
+        font-size: 10px;
+    }
+
+    .task-card img {
+        height: 100px;
+    }
+
+    .task-card .approve-button {
+        display: none !important;
+    }
+
+    .modal-content {
+        width: 95%;
+        padding: 10px;
+    }
+}
+
+.show-more {
+    padding: 8px 16px;
+    background-color: #28a745;
+    color: white;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    margin-top: 15px;
+    transition: background-color 0.3s, transform 0.2s;
+    display: none;
+}
+
+.show-more:hover {
+    background-color: #218838;
+    transform: scale(1.05);
+}

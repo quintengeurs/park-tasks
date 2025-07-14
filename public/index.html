@@ -1,1 +1,154 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
 
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task and Issue Management</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="canvas">
+            <nav class="nav">
+                <div class="nav-buttons">
+                    <button onclick="navigateToSection('section1')">Go to Section 1</button>
+                    <button onclick="navigateToSection('section2')">Go to Section 2</button>
+                    <button onclick="navigateToSection('section3')">Go to Section 3</button>
+                    <button onclick="navigateToSection('section4')">Go to Section 4</button>
+                </div>
+            </nav>
+            <nav class="task-nav">
+                <div class="task-nav-buttons">
+                    <button onclick="openTaskForm()">Raise Task</button>
+                    <button onclick="openIssueForm()">Raise Issue</button>
+                    <button onclick="logout()">Logout</button>
+                    <button>Placeholder</button>
+                </div>
+            </nav>
+            <div id="taskModal" class="modal">
+                <div class="modal-content">
+                    <h2>Raise New Task</h2>
+                    <form id="taskForm">
+                        <label for="taskTitle">Title:</label>
+                        <input type="text" id="taskTitle" required>
+                        <label for="taskDescription">Description:</label>
+                        <textarea id="taskDescription" required></textarea>
+                        <label for="taskImage">Image URL (optional):</label>
+                        <input type="text" id="taskImage" placeholder="https://via.placeholder.com/300x150">
+                        <button type="submit">Submit Task</button>
+                        <button type="button" class="close" onclick="closeTaskForm()">Close</button>
+                    </form>
+                </div>
+            </div>
+            <div id="issueModal" class="modal">
+                <div class="modal-content">
+                    <h2>Raise New Issue</h2>
+                    <form id="issueForm">
+                        <label for="issueLocation">Location:</label>
+                        <input type="text" id="issueLocation" required>
+                        <label for="issueDescription">Description:</label>
+                        <textarea id="issueDescription" required></textarea>
+                        <label for="issueImage">Image URL (optional):</label>
+                        <input type="text" id="issueImage" placeholder="https://via.placeholder.com/300x150">
+                        <label for="issueUrgency">Urgency:</label>
+                        <select id="issueUrgency" required>
+                            <option value="1">Low</option>
+                            <option value="2">Medium</option>
+                            <option value="3">High</option>
+                        </select>
+                        <button type="submit">Submit Issue</button>
+                        <button type="button" class="close" onclick="closeIssueForm()">Close</button>
+                    </form>
+                </div>
+            </div>
+            <div id="imageModal" class="modal">
+                <div class="modal-content">
+                    <h2>Issue Image</h2>
+                    <img id="modalImage" src="" alt="Issue Image">
+                    <button type="button" class="close" onclick="closeImageModal()">Close</button>
+                </div>
+            </div>
+            <div id="section1" class="section section1">
+                <h2>Section 1 - Tasks</h2>
+                <div class="task-grid" id="taskGrid"></div>
+            </div>
+            <div id="section2" class="section section2">
+                <h2>Section 2 - Raised Issues</h2>
+                <table class="issues-table">
+                    <thead>
+                        <tr>
+                            <th onclick="sortTable(0)">Location</th>
+                            <th onclick="sortTable(1)">Description</th>
+                            <th onclick="sortTable(2)">Time Raised</th>
+                            <th onclick="sortTable(3)">Urgency</th>
+                            <th>Image</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="issuesTableBody"></tbody>
+                </table>
+            </div>
+            <div id="section3" class="section section3">
+                <h2>Section 3 - Archived Tasks</h2>
+                <div class="archive-grid" id="archiveGrid"></div>
+                <button class="show-more" id="showMoreButton" onclick="showMoreTasks()">Show More</button>
+            </div>
+            <div id="section4" class="section section4">
+                <h2>Section 4 - Resolved Issues</h2>
+                <table class="issues-table">
+                    <thead>
+                        <tr>
+                            <th>Location</th>
+                            <th>Description</th>
+                            <th>Time Raised</th>
+                            <th>Urgency</th>
+                            <th>Image</th>
+                        </tr>
+                    </thead>
+                    <tbody id="resolvedIssuesTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>
