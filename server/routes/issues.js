@@ -1,40 +1,46 @@
 const express = require('express');
-const { db } = require('../database');
+  const { pool } = require('../database');
 
-const router = express.Router();
+  const router = express.Router();
 
-router.get('/', (req, res) => {
-    db.all('SELECT * FROM issues WHERE user_id = ? AND resolved = 0', [req.user.id], (err, issues) => {
-        if (err) return res.status(500).json({ message: 'Database error' });
-        res.json(issues);
-    });
-});
+  router.get('/', async (req, res) => {
+      try {
+          const { rows } = await pool.query('SELECT * FROM issues WHERE user_id = $1 AND resolved = FALSE', [req.user.id]);
+          res.json(rows);
+      } catch (err) {
+          res.status(500).json({ message: 'Database error' });
+      }
+  });
 
-router.get('/resolved', (req, res) => {
-    db.all('SELECT * FROM issues WHERE user_id = ? AND resolved = 1', [req.user.id], (err, issues) => {
-        if (err) return res.status(500).json({ message: 'Database error' });
-        res.json(issues);
-    });
-});
+  router.get('/resolved', async (req, res) => {
+      try {
+          const { rows } = await pool.query('SELECT * FROM issues WHERE user_id = $1 AND resolved = TRUE', [req.user.id]);
+          res.json(rows);
+      } catch (err) {
+          res.status(500).json({ message: 'Database error' });
+      }
+  });
 
-router.post('/', (req, res) => {
-    const { location, description, urgency, image } = req.body;
-    const created_at = new Date().toISOString();
-    db.run(
-        'INSERT INTO issues (user_id, location, description, urgency, image, resolved, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [req.user.id, location, description, urgency, image, 0, created_at],
-        (err) => {
-            if (err) return res.status(500).json({ message: 'Database error' });
-            res.status(201).json({ message: 'Issue created' });
-        }
-    );
-});
+  router.post('/', async (req, res) => {
+      const { location, description, urgency, image } = req.body;
+      try {
+          await pool.query(
+              'INSERT INTO issues (user_id, location, description, urgency, image, resolved, created_at) VALUES ($1, $2, $3, $4, $5, FALSE, CURRENT_TIMESTAMP)',
+              [req.user.id, location, description, urgency, image]
+          );
+          res.status(201).json({ message: 'Issue created' });
+      } catch (err) {
+          res.status(500).json({ message: 'Database error' });
+      }
+  });
 
-router.patch('/:id/resolve', (req, res) => {
-    db.run('UPDATE issues SET resolved = 1 WHERE id = ? AND user_id = ?', [req.params.id, req.user.id], (err) => {
-        if (err) return res.status(500).json({ message: 'Database error' });
-        res.json({ message: 'Issue resolved' });
-    });
-});
+  router.patch('/:id/resolve', async (req, res) => {
+      try {
+          await pool.query('UPDATE issues SET resolved = TRUE WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+          res.json({ message: 'Issue resolved' });
+      } catch (err) {
+          res.status(500).json({ message: 'Database error' });
+      }
+  });
 
-module.exports = router;
+  module.exports = router;
